@@ -98,28 +98,14 @@ export const forwardLeads = async (
  * @param department Department name (e.g., "Customer Service")
  * @returns {Promise<Lead[]>}
  */
-export const getForwardEmployeeLeads = async (
-  employeeId: string,
-  department: string
-): Promise<Lead[]> => {
-  if (!employeeId || !department) {
-    throw new Error("employeeId and department are required");
-  }
+// example wrapper
+export async function getForwardEmployeeLeads(mongoId: string | null, department: string, employeeCode?: string) {
+  const params = new URLSearchParams();
+  if (mongoId) params.append("employeeId", mongoId);
+  if (employeeCode) params.append("employeeCode", employeeCode);
+  params.append("department", department);
 
-  try {
-    const res = await fetch(
-      `/api/leads/get?employeeId=${employeeId}&department=${department}`,
-      { cache: "no-store" }
-    );
+  const res = await fetch(`/api/leads/get?${params.toString()}`, { cache: "no-store" });
+  return res.ok ? (await res.json()) : null;
+}
 
-    if (!res.ok) {
-      throw new Error("Failed to fetch leads");
-    }
-
-    const data = await res.json();
-    return data.leads || [];
-  } catch (err: any) {
-    console.error("Error fetching leads:", err.message);
-    throw err;
-  }
-};

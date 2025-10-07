@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useSession } from "@/lib/frontendApis/login/session";
 import LoadingSkeleton from "@/app/component/loading/loading";
 import ForwardLeadsList from "../component/ForwardLeadsList";
@@ -14,11 +14,15 @@ type UserRole = "admin" | "manager" | "employee";
 
 export default function ForwardLeadsPage() {
   const { session, loading } = useSession();
-  const [forwardLeads, setForwardLeads] = useState<Lead[]>([]);
+  const [backendLeads, setBackendLeads] = useState<Lead[]>([]);
   const [fetching, setFetching] = useState<boolean>(false);
+
+  // Memoized leads array (always defined)
+  const leads: Lead[] = useMemo(() => (Array.isArray(backendLeads) ? backendLeads : []), [backendLeads]);
 
   /**
    * Fetch leads assigned to the current user/employee
+   * Can search by MongoId (employeeId) or employeeCode
    */
   const fetchLeads = async () => {
     if (!session) {
@@ -27,27 +31,38 @@ export default function ForwardLeadsPage() {
     }
 
     setFetching(true);
-    console.log("🔹 Fetching leads for session:", session);
+    console.group("🔹 Fetching leads for session");
+    console.log(session);
 
     try {
       const employeeMongoId = session.mongoId ?? "";
+      const employeeCode = session.employeeId ?? "";
       const department = session.department ?? "";
 
-      if (!employeeMongoId) {
-        console.warn("❌ Employee Mongo ID missing in session");
-        setForwardLeads([]);
+      if (!employeeMongoId && !employeeCode) {
+        console.warn("❌ Both Employee Mongo ID and Employee Code are missing in session");
+        setBackendLeads([]);
         return;
       }
 
-      const leads = await getForwardEmployeeLeads(employeeMongoId, department);
+      // Call API with both employeeId and employeeCode
+      const data = await getForwardEmployeeLeads(employeeMongoId, department, employeeCode);
+      console.log("📦 API Response:", data);
 
-      console.log("📦 Leads fetched from API:", leads);
-      setForwardLeads(leads || []);
+      // Unwrap leads array from API response
+      if (data.success && Array.isArray(data.leads)) {
+        setBackendLeads(data.leads);
+        console.log("✅ Leads set to state:", data.leads.length);
+      } else {
+        console.warn("⚠️ No leads returned from API or invalid format");
+        setBackendLeads([]);
+      }
     } catch (err) {
       console.error("❌ Error fetching forward leads:", err);
-      setForwardLeads([]);
+      setBackendLeads([]);
     } finally {
       setFetching(false);
+      console.groupEnd();
     }
   };
 
@@ -57,15 +72,6 @@ export default function ForwardLeadsPage() {
       fetchLeads();
     }
   }, [loading, session]);
-
-  if (loading || fetching) {
-    return (
-      <div>
-        <LoadingSkeleton />
-        <p>Fetching leads...</p>
-      </div>
-    );
-  }
 
   const role: UserRole = (session?.role as UserRole) || "employee";
   const employeeMongoId: string = session?.mongoId ?? "";
@@ -93,31 +99,40 @@ export default function ForwardLeadsPage() {
       if (data.success) {
         console.log("✅ Leads forwarded successfully!", data);
         alert("Leads forwarded successfully!");
-        // Refresh leads after forwarding
-        await fetchLeads();
+        await fetchLeads(); // Refresh leads
       } else {
         console.error("❌ Failed to forward leads:", data.message);
         alert("Failed to forward leads: " + (data.message || "Unknown error"));
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("❌ Error forwarding leads:", err);
       alert("Error forwarding leads. Check console for details.");
     }
   };
 
+  // Render loading state first
+  if (loading || fetching) {
+    return (
+      <div>
+        <LoadingSkeleton />
+        <p>Fetching leads...</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="p-4">
       <h1 className="text-xl font-bold mb-4">Forward Leads</h1>
       <ForwardLeadsList
         role={role}
         employeeMongoId={employeeMongoId}
         employeeCode={employeeCode}
         department={department}
-        leads={forwardLeads}
+        leads={leads}
         onForward={handleForward}
       />
-      <div className="mt-2">
-        <p>Total leads displayed: {forwardLeads.length}</p>
+      <div className="mt-2 text-sm text-gray-600">
+        <p>Total leads displayed: {leads.length}</p>
       </div>
     </div>
   );
