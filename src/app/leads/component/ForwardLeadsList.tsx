@@ -19,15 +19,11 @@ interface ForwardLeadsListProps {
   employeeCode: string;
   department: string;
   leads: BackendLead[];
-  employees?: EmployeeOption[]; // for admin dropdown
+  employees?: EmployeeOption[];
   onDelete?: (lead: FrontLead) => void;
   onForward?: (leadIds: string[], forwardTo: string) => void;
 }
 
-/**
- * Safe converter: accepts string | object-with-toString | undefined and returns string.
- * Avoids using mongoose ObjectId at runtime (which is a type in TS contexts).
- */
 const toStringId = (id?: unknown): string => {
   if (!id) return "";
   if (typeof id === "string") return id;
@@ -63,7 +59,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
   onDelete,
   onForward,
 }) => {
-  // state
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [managerIdInput, setManagerIdInput] = useState<string>("");
   const [forwardDept, setForwardDept] = useState<string>("");
@@ -74,7 +69,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     [role, department]
   );
 
-  // Minimal expected backend shape used only for safe mapping
   interface BackendLeadShape {
     _id?: unknown;
     leadId?: string;
@@ -83,7 +77,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     currentAssignedEmployee?: { employeeName?: string };
   }
 
-  // Map backend -> front lead (no `any`)
   const leads: FrontLead[] = useMemo(() => {
     return backendLeads.map((lead) => {
       const l = lead as unknown as BackendLeadShape;
@@ -103,7 +96,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     });
   }, [backendLeads]);
 
-  // filteredLeads (we're not rendering a search input per your ask)
   const filteredLeads = useMemo(() => leads, [leads]);
 
   const toggleSelect = (id: string) => {
@@ -141,17 +133,16 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     }
   };
 
-  // Employee forward options per rules; fallback to sensible defaults
   const forwardOptionsForEmployee = useMemo(() => {
     const d = normalizeDept(department);
     if (d === "customerservice") return ["sourcing", "shipping"];
     if (d === "sourcing") return ["shipping"];
     if (d === "shipping") return ["sales"];
-    // fallback so select isn't empty
     return ["sourcing", "shipping", "sales"];
   }, [department]);
 
-  // Admin employees list + "all"
+  const adminForwardDepartments = ["customerservice", "sourcing", "shipping", "sales"];
+
   const adminEmployeeOptions = useMemo(() => {
     const opts = employees
       .map((e) => {
@@ -163,7 +154,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     return [{ id: "all", label: "All employees" }, ...opts];
   }, [employees]);
 
-  // defaults when options appear
   useEffect(() => {
     if (role === "employee" && forwardOptionsForEmployee.length > 0 && !forwardDept) {
       setForwardDept(forwardOptionsForEmployee[0]);
@@ -171,10 +161,10 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
   }, [role, forwardOptionsForEmployee, forwardDept]);
 
   useEffect(() => {
-    if (role === "admin" && adminEmployeeOptions.length > 0 && !selectedEmployee) {
-      setSelectedEmployee(adminEmployeeOptions[0].id);
+    if (role === "admin" && !forwardDept) {
+      setForwardDept(adminForwardDepartments[0]);
     }
-  }, [role, adminEmployeeOptions, selectedEmployee]);
+  }, [role, forwardDept]);
 
   const handleForwardClick = () => {
     const selectedIds = Array.from(selectedLeadIds).filter((id) => id.length > 0);
@@ -195,11 +185,15 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
       const target = `manager:${managerIdInput.trim()}|dept:${forwardDept}`;
       onForward?.(selectedIds, target);
     } else if (role === "admin") {
-      if (!selectedEmployee) {
-        alert("Select an employee (or All).");
+      if (!selectedEmployee.trim()) {
+        alert("Enter employee ID.");
         return;
       }
-      const target = selectedEmployee === "all" ? "all" : `employee:${selectedEmployee}`;
+      if (!forwardDept) {
+        alert("Select a department to forward to.");
+        return;
+      }
+      const target = `employee:${selectedEmployee.trim()}|dept:${forwardDept}`;
       onForward?.(selectedIds, target);
     } else if (role === "manager") {
       if (!managerIdInput.trim()) {
@@ -213,7 +207,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
       return;
     }
 
-    // reset
     setSelectedLeadIds(new Set());
     setManagerIdInput("");
     setForwardDept("");
@@ -258,18 +251,27 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
           </>
         )}
 
-        {/* Admin UI */}
+        {/* Admin UI (added department dropdown same as employee) */}
         {role === "admin" && (
           <>
-            <select
+            <input
+              type="text"
+              placeholder="Enter employee ID"
+              className="border rounded-md px-3 py-2"
               value={selectedEmployee}
               onChange={(e) => setSelectedEmployee(e.target.value)}
+              aria-label="Employee ID"
+            />
+
+            <select
+              value={forwardDept}
+              onChange={(e) => setForwardDept(e.target.value)}
               className="border rounded-md px-3 py-2"
-              aria-label="Select employee to forward to"
+              aria-label="Select department to forward to"
             >
-              {adminEmployeeOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
+              {adminForwardDepartments.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
                 </option>
               ))}
             </select>

@@ -1,4 +1,3 @@
-// /app/api/leads/get/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Lead from "@/models/lead";
@@ -32,9 +31,32 @@ export async function GET(req: NextRequest) {
     const employeeId = searchParams.get("employeeId");   // session.mongoId
     const employeeCode = searchParams.get("employeeCode"); // session.employeeId / code
     const department = searchParams.get("department");
+    const role = searchParams.get("role"); // 🔹 Now receiving role from frontend
 
-    console.log("🔹 Query Params Received:", { employeeId, employeeCode, department });
+    console.log("🔹 Query Params Received:", { employeeId, employeeCode, department, role });
 
+    // 🟩 If role is admin → return ALL leads, no filter
+    if (role && role.toLowerCase() === "admin") {
+      console.log("🟩 Admin detected — Fetching all leads without filters");
+      const allLeads = await Lead.find({}).lean().exec();
+
+      const leads: LeadDoc[] = allLeads.map((s: any) => ({
+        _id: s._id?.toString() || "",
+        leadId: s.leadId || "",
+        currentStatus: s.currentStatus || "",
+        currentAssignedEmployee: s.currentAssignedEmployee || undefined,
+        customerService: s.customerService || undefined,
+        sourcing: s.sourcing || undefined,
+        shipping: s.shipping || undefined,
+        sales: s.sales || undefined,
+      }));
+
+      console.log("📦 Admin fetched total leads:", leads.length);
+      console.groupEnd();
+      return NextResponse.json({ success: true, count: leads.length, leads }, { status: 200 });
+    }
+
+    // 🟨 For non-admin users — existing logic
     if (!department || (!employeeId && !employeeCode)) {
       console.groupEnd();
       return NextResponse.json(
@@ -89,9 +111,8 @@ export async function GET(req: NextRequest) {
 
     console.log("🧠 Built Query Object:", JSON.stringify(query, null, 2));
 
-    // Fetch leads (typed as unknown[], then mapped to strict LeadDoc[])
+    // Fetch leads (typed)
     const fetchedLeads = await Lead.find(query).lean().exec() as unknown[];
-
     const leads: LeadDoc[] = fetchedLeads.map((s) => {
       const obj = s as Record<string, any>;
       return {

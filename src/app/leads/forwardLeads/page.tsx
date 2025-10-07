@@ -17,13 +17,8 @@ export default function ForwardLeadsPage() {
   const [backendLeads, setBackendLeads] = useState<Lead[]>([]);
   const [fetching, setFetching] = useState<boolean>(false);
 
-  // Memoized leads array (always defined)
   const leads: Lead[] = useMemo(() => (Array.isArray(backendLeads) ? backendLeads : []), [backendLeads]);
 
-  /**
-   * Fetch leads assigned to the current user/employee
-   * Can search by MongoId (employeeId) or employeeCode
-   */
   const fetchLeads = async () => {
     if (!session) {
       console.warn("Session not available yet, cannot fetch leads.");
@@ -38,23 +33,32 @@ export default function ForwardLeadsPage() {
       const employeeMongoId = session.mongoId ?? "";
       const employeeCode = session.employeeId ?? "";
       const department = session.department ?? "";
+      const role: UserRole = (session.role as UserRole) || "employee";
 
-      if (!employeeMongoId && !employeeCode) {
-        console.warn("❌ Both Employee Mongo ID and Employee Code are missing in session");
-        setBackendLeads([]);
-        return;
-      }
+      console.log("📨 Sending params to API:", {
+        employeeMongoId,
+        department,
+        employeeCode,
+        role,
+      });
 
-      // Call API with both employeeId and employeeCode
-      const data = await getForwardEmployeeLeads(employeeMongoId, department, employeeCode);
+      // Include role in the request
+      const urlParams = new URLSearchParams({
+        employeeId: employeeMongoId,
+        employeeCode,
+        department,
+        role,
+      });
+
+      const res = await fetch(`/api/leads/get?${urlParams.toString()}`);
+      const data = await res.json();
       console.log("📦 API Response:", data);
 
-      // Unwrap leads array from API response
       if (data.success && Array.isArray(data.leads)) {
         setBackendLeads(data.leads);
         console.log("✅ Leads set to state:", data.leads.length);
       } else {
-        console.warn("⚠️ No leads returned from API or invalid format");
+        console.warn("⚠️ No leads returned or invalid format");
         setBackendLeads([]);
       }
     } catch (err) {
@@ -66,7 +70,6 @@ export default function ForwardLeadsPage() {
     }
   };
 
-  // Fetch leads once session is ready
   useEffect(() => {
     if (!loading && session) {
       fetchLeads();
@@ -78,16 +81,9 @@ export default function ForwardLeadsPage() {
   const employeeCode: string = session?.employeeId ?? "";
   const department: string = session?.department ?? "all";
 
-  /**
-   * Forward selected leads to another employee/manager
-   */
   const handleForward = async (leadIds: string[], forwardTo: string) => {
-    if (!leadIds.length) {
-      console.warn("No leads selected to forward.");
-      return;
-    }
-    if (!forwardTo) {
-      console.warn("Forward target not specified.");
+    if (!leadIds.length || !forwardTo) {
+      console.warn("Invalid forward parameters");
       return;
     }
 
@@ -104,13 +100,12 @@ export default function ForwardLeadsPage() {
         console.error("❌ Failed to forward leads:", data.message);
         alert("Failed to forward leads: " + (data.message || "Unknown error"));
       }
-    } catch (err: unknown) {
+    } catch (err) {
       console.error("❌ Error forwarding leads:", err);
       alert("Error forwarding leads. Check console for details.");
     }
   };
 
-  // Render loading state first
   if (loading || fetching) {
     return (
       <div>
