@@ -1,4 +1,4 @@
-import { Schema, model, models, Types, Document } from "mongoose";
+import { Schema, model, models, Types } from "mongoose";
 
 // ---------------------
 // Log Schema & Interface
@@ -10,12 +10,15 @@ export interface Log {
   comment: string;
 }
 
-const LogSchema = new Schema({
-  employeeId: { type: String, required: true }, // <-- string
-  employeeName: { type: String, required: true },
-  timestamp: { type: Date, default: Date.now },
-  comment: { type: String, required: true },
-}, { _id: false });
+const LogSchema = new Schema<Log>(
+  {
+    employeeId: { type: String, required: true },
+    employeeName: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now },
+    comment: { type: String, required: true },
+  },
+  { _id: false }
+);
 
 // ---------------------
 // Product Schema & Interface
@@ -177,11 +180,13 @@ export interface AssignedEmployee {
   employeeName?: string;
 }
 
-const AssignedEmployeeSchema = new Schema({
-  employeeId: { type: String }, // <-- string, not ObjectId
-  employeeName: String,
-}, { _id: false });
-
+const AssignedEmployeeSchema = new Schema(
+  {
+    employeeId: { type: String },
+    employeeName: String,
+  },
+  { _id: false }
+);
 
 // ---------------------
 // Lead Schema & Interface
@@ -213,7 +218,9 @@ const LeadSchema = new Schema<Lead>(
   { timestamps: true }
 );
 
-// Prevent OverwriteModelError
+// ---------------------
+// Prevent OverwriteModelError (Next.js Hot Reload safe)
+// ---------------------
 const LeadModel = models.Lead || model<Lead>("Lead", LeadSchema);
 
 export default LeadModel;

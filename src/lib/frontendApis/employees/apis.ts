@@ -86,10 +86,16 @@ export const forwardLeads = async (
 
     const data: ForwardLeadsResponse = await res.json();
     return data;
-  } catch (err: any) {
+ } catch (err: unknown) {
+  if (err instanceof Error) {
     console.error("Forward leads error:", err.message);
-    throw err;
+    throw err; // re-throw the original error
+  } else {
+    console.error("Forward leads error:", err);
+    throw new Error("Unknown error occurred while forwarding leads");
   }
+}
+
 };
 
 /**
@@ -109,3 +115,63 @@ export async function getForwardEmployeeLeads(mongoId: string | null, department
   return res.ok ? (await res.json()) : null;
 }
 
+
+// upload file to cloudinary global api 
+export async function uploadToCloudinary(file: File): Promise<string> {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append(
+      "upload_preset",
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "ml_default"
+    );
+
+    const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+    if (!cloudName) throw new Error("Cloudinary cloud name is not defined");
+
+    const url = `https://api.cloudinary.com/v1_1/${cloudName}/upload`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Cloudinary upload failed: ${res.statusText}`);
+    }
+
+    const data = await res.json();
+    return data.secure_url as string;
+  } catch (err) {
+    console.error("uploadToCloudinary error:", err);
+    throw err;
+  }
+}
+
+export interface DepartmentPayload {
+  employeeId: string;
+  department: string;
+  data: Record<string, unknown>; // dynamic — works for all departments
+  logs?: Record<string, unknown>[];
+}
+export async function submitDepartmentData(
+  payload: DepartmentPayload
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch(`/api/leads/update`, {
+      method: "PUT", // ✅ changed from POST to PUT
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      console.error("submitDepartmentData failed:", res.statusText);
+      return { success: false, message: res.statusText };
+    }
+
+    return (await res.json()) as { success: boolean; message: string };
+  } catch (err) {
+    console.error("submitDepartmentData error:", err);
+    return { success: false, message: "Network error" };
+  }
+}

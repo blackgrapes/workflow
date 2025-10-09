@@ -165,7 +165,7 @@ const ForwardLeadsTable: React.FC<ForwardLeadsTableProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/leads/edit/${id}`);
+                          router.push(`/employee/updateLeadsDetails/${id}`);
                         }}
                         className="text-sm px-3 py-1 rounded-md border hover:bg-gray-50"
                         title="Edit Lead"

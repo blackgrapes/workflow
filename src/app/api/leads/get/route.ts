@@ -1,3 +1,4 @@
+// src/app/api/leads/get/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Lead from "@/models/lead";
@@ -20,6 +21,21 @@ interface LeadDoc {
   sales?: EmployeeRef;
 }
 
+/**
+ * Represents the shape of the documents returned by .lean()
+ * Keep fields optional because DB documents may miss some fields.
+ */
+interface FetchedLead {
+  _id?: string | { toString(): string };
+  leadId?: string;
+  currentStatus?: string;
+  currentAssignedEmployee?: EmployeeRef;
+  customerService?: EmployeeRef;
+  sourcing?: EmployeeRef;
+  shipping?: EmployeeRef;
+  sales?: EmployeeRef;
+}
+
 export async function GET(req: NextRequest) {
   console.group("🟦 [API] GET /api/leads/get Debug Log");
 
@@ -28,7 +44,7 @@ export async function GET(req: NextRequest) {
     console.log("✅ MongoDB connected");
 
     const { searchParams } = new URL(req.url);
-    const employeeId = searchParams.get("employeeId");   // session.mongoId
+    const employeeId = searchParams.get("employeeId"); // session.mongoId
     const employeeCode = searchParams.get("employeeCode"); // session.employeeId / code
     const department = searchParams.get("department");
     const role = searchParams.get("role"); // 🔹 Now receiving role from frontend
@@ -38,17 +54,17 @@ export async function GET(req: NextRequest) {
     // 🟩 If role is admin → return ALL leads, no filter
     if (role && role.toLowerCase() === "admin") {
       console.log("🟩 Admin detected — Fetching all leads without filters");
-      const allLeads = await Lead.find({}).lean().exec();
+      const allLeads = (await Lead.find({}).lean().exec()) as FetchedLead[];
 
-      const leads: LeadDoc[] = allLeads.map((s: any) => ({
-        _id: s._id?.toString() || "",
-        leadId: s.leadId || "",
-        currentStatus: s.currentStatus || "",
-        currentAssignedEmployee: s.currentAssignedEmployee || undefined,
-        customerService: s.customerService || undefined,
-        sourcing: s.sourcing || undefined,
-        shipping: s.shipping || undefined,
-        sales: s.sales || undefined,
+      const leads: LeadDoc[] = allLeads.map((s: FetchedLead) => ({
+        _id: s._id ? (typeof s._id === "string" ? s._id : s._id.toString()) : "",
+        leadId: s.leadId ?? "",
+        currentStatus: s.currentStatus ?? "",
+        currentAssignedEmployee: s.currentAssignedEmployee ?? undefined,
+        customerService: s.customerService ?? undefined,
+        sourcing: s.sourcing ?? undefined,
+        shipping: s.shipping ?? undefined,
+        sales: s.sales ?? undefined,
       }));
 
       console.log("📦 Admin fetched total leads:", leads.length);
@@ -97,7 +113,7 @@ export async function GET(req: NextRequest) {
 
     // Remove duplicates
     const seen = new Set<string>();
-    const dedupedOr = orClauses.filter(c => {
+    const dedupedOr = orClauses.filter((c) => {
       const key = JSON.stringify(c);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -112,20 +128,17 @@ export async function GET(req: NextRequest) {
     console.log("🧠 Built Query Object:", JSON.stringify(query, null, 2));
 
     // Fetch leads (typed)
-    const fetchedLeads = await Lead.find(query).lean().exec() as unknown[];
-    const leads: LeadDoc[] = fetchedLeads.map((s) => {
-      const obj = s as Record<string, any>;
-      return {
-        _id: obj._id?.toString() || "",
-        leadId: obj.leadId || "",
-        currentStatus: obj.currentStatus || "",
-        currentAssignedEmployee: obj.currentAssignedEmployee || undefined,
-        customerService: obj.customerService || undefined,
-        sourcing: obj.sourcing || undefined,
-        shipping: obj.shipping || undefined,
-        sales: obj.sales || undefined,
-      };
-    });
+    const fetchedLeads = (await Lead.find(query).lean().exec()) as FetchedLead[];
+    const leads: LeadDoc[] = fetchedLeads.map((s: FetchedLead) => ({
+      _id: s._id ? (typeof s._id === "string" ? s._id : s._id.toString()) : "",
+      leadId: s.leadId ?? "",
+      currentStatus: s.currentStatus ?? "",
+      currentAssignedEmployee: s.currentAssignedEmployee ?? undefined,
+      customerService: s.customerService ?? undefined,
+      sourcing: s.sourcing ?? undefined,
+      shipping: s.shipping ?? undefined,
+      sales: s.sales ?? undefined,
+    }));
 
     console.log("📦 Leads fetched:", leads.length);
 
@@ -133,20 +146,17 @@ export async function GET(req: NextRequest) {
     let diagnostics: LeadDoc[] | null = null;
     if (leads.length === 0) {
       try {
-        const samples = await Lead.find({ currentStatus: regexStatus }).limit(5).lean().exec() as unknown[];
-        diagnostics = samples.map((s) => {
-          const obj = s as Record<string, any>;
-          return {
-            _id: obj._id?.toString() || "",
-            leadId: obj.leadId || "",
-            currentStatus: obj.currentStatus || "",
-            currentAssignedEmployee: obj.currentAssignedEmployee || undefined,
-            customerService: obj.customerService || undefined,
-            sourcing: obj.sourcing || undefined,
-            shipping: obj.shipping || undefined,
-            sales: obj.sales || undefined,
-          };
-        });
+        const samples = (await Lead.find({ currentStatus: regexStatus }).limit(5).lean().exec()) as FetchedLead[];
+        diagnostics = samples.map((s: FetchedLead) => ({
+          _id: s._id ? (typeof s._id === "string" ? s._id : s._id.toString()) : "",
+          leadId: s.leadId ?? "",
+          currentStatus: s.currentStatus ?? "",
+          currentAssignedEmployee: s.currentAssignedEmployee ?? undefined,
+          customerService: s.customerService ?? undefined,
+          sourcing: s.sourcing ?? undefined,
+          shipping: s.shipping ?? undefined,
+          sales: s.sales ?? undefined,
+        }));
       } catch (diagErr) {
         console.error("❌ Diagnostics fetch failed:", diagErr);
         diagnostics = null;

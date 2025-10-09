@@ -1,16 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import ProductSourcingForm from "./ProductSourcingForm";
 import ShippingHelpForm from "./ShippingHelpForm";
-import { useState } from "react";
 
-interface Product {
+export interface Product {
   id: number;
   name: string;
   qty: string;
   size: string;
   usage: string;
   price: string;
+  imageUrl?: string; // added for Cloudinary image
 }
 
 interface CustomerInquiryPageProps {
@@ -81,7 +82,6 @@ export default function CustomerInquiryPage({
           </button>
         </div>
 
-        {/* Product Sourcing Form */}
         {tab === "sourcing" && (
           <ProductSourcingForm
             products={products}
@@ -92,7 +92,6 @@ export default function CustomerInquiryPage({
           />
         )}
 
-        {/* Shipping Help Form */}
         {tab === "shipping" && (
           <ShippingHelpForm
             shippingInfo={shippingInfo}

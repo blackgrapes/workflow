@@ -23,13 +23,6 @@ export default function CustomerInquiry() {
   const employeeId = session.employeeId; // legacy ID
   const employeeName = session.name;
   const employeeMongoId = session.mongoId; // ✅ MongoDB ObjectId
-
-  console.log("🟢 Employee Info:", {
-    employeeId,
-    employeeName,
-    employeeMongoId,
-  });
-
   // Handle form submission
   const handleSubmit = async (data: {
     type: "sourcing" | "shipping";
@@ -38,12 +31,6 @@ export default function CustomerInquiry() {
     shippingInfo?: unknown;
   }) => {
     try {
-      if (!employeeMongoId) {
-        console.error("❌ Missing MongoDB ObjectId for employee!");
-        alert("Cannot submit inquiry: missing employee MongoDB ID.");
-        return;
-      }
-
       // Build payload with MongoDB ObjectId
       const payload = {
         ...data,

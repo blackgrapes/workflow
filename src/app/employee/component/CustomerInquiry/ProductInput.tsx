@@ -16,7 +16,7 @@ interface ProductInputProps {
   product: Product;
   index: number;
   removeProduct?: (id: number) => void;
-  onChange: (id: number, field: string, value: string) => void;
+  onChange: (id: number, field: keyof Product, value: string) => void;
   isRemovable?: boolean;
 }
 
@@ -70,12 +70,6 @@ const ProductInput = ({ product, index, removeProduct, onChange, isRemovable = t
           placeholder="Target Price"
           value={product.price}
           onChange={(e) => onChange(product.id, "price", e.target.value)}
-        />
-        <Input
-          id={`file-${product.id}`}
-          label="Upload Photos/Videos"
-          type="file"
-          multiple
         />
       </div>
     </div>

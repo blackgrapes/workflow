@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Lead from "@/models/lead";
 import { Types } from "mongoose";
+import { v2 as cloudinary } from "cloudinary";
+
+// ---------------------
+// Cloudinary config
+// ---------------------
+cloudinary.config({
+  secure: true, // use HTTPS
+  // CLOUDINARY_URL from .env is automatically used
+});
 
 const safeString = (value: unknown) => (value ? String(value) : "");
 const safeNumber = (value: unknown) =>
@@ -14,12 +23,29 @@ const toObjectId = (id: unknown) => {
   }
 };
 
+// ---------------------
+// Helper to upload file to Cloudinary
+// ---------------------
+const uploadFile = async (file: string | Blob) => {
+  const buffer =
+    file instanceof Blob ? Buffer.from(await file.arrayBuffer()) : Buffer.from(file);
+  return new Promise<string>((resolve, reject) => {
+    const upload = cloudinary.uploader.upload_stream(
+      { folder: "uploads" },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result?.secure_url || "");
+      }
+    );
+    upload.end(buffer);
+  });
+};
+
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
-
+    console.log("i got your request")
     const body: unknown = await req.json();
-    console.log("POST /api/employee body:", body);
 
     if (typeof body !== "object" || body === null) {
       return NextResponse.json(
@@ -66,6 +92,38 @@ export async function POST(req: NextRequest) {
       logs: [],
     };
 
+    // ---------------------
+    // Upload product files to Cloudinary if present
+    // ---------------------
+    const mappedProducts =
+      Array.isArray(products) && products.length > 0
+        ? await Promise.all(
+            products.map(async (p) => {
+              const prod = p as Record<string, unknown>;
+              const files = Array.isArray(prod.uploadFiles) ? prod.uploadFiles : [];
+              const uploadedFiles: string[] = [];
+
+              for (const f of files) {
+                try {
+                  const url = await uploadFile(f as string | Blob);
+                  if (url) uploadedFiles.push(url);
+                } catch (err) {
+                  console.error("File upload failed:", err);
+                }
+              }
+
+              return {
+                productName: safeString(prod.name),
+                quantity: safeNumber(prod.qty),
+                size: safeString(prod.size),
+                usage: safeString(prod.usage),
+                targetPrice: safeNumber(prod.price),
+                uploadFiles: uploadedFiles,
+              };
+            })
+          )
+        : [];
+
     const leadData = {
       leadId,
       currentStatus: type === "sourcing" ? "Customer Service" : "Shipping",
@@ -87,21 +145,7 @@ export async function POST(req: NextRequest) {
         ),
         city: safeString((customerInfo as Record<string, unknown>)?.city),
         state: safeString((customerInfo as Record<string, unknown>)?.state),
-        products: Array.isArray(products)
-          ? products.map((p) => {
-              const prod = p as Record<string, unknown>;
-              return {
-                productName: safeString(prod.name),
-                quantity: safeNumber(prod.qty),
-                size: safeString(prod.size),
-                usage: safeString(prod.usage),
-                targetPrice: safeNumber(prod.price),
-                uploadFiles: Array.isArray(prod.uploadFiles)
-                  ? prod.uploadFiles
-                  : [],
-              };
-            })
-          : [],
+        products: mappedProducts,
       },
       sourcing: {
         ...baseSection,
@@ -159,7 +203,6 @@ export async function POST(req: NextRequest) {
     const newLead = new Lead(leadData);
     await newLead.save();
 
-    console.log("Lead created successfully:", newLead._id);
     return NextResponse.json(
       { message: "Lead created successfully", lead: newLead },
       { status: 201 }
