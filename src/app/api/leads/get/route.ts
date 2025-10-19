@@ -81,8 +81,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Case-insensitive exact match
-    const regexStatus = new RegExp(`^${department}$`, "i");
+    // Normalize department so "Customer Service", "customer service" or "customerservice" all match.
+    // We replace spaces in the incoming department with \s* in the regex so that DB values with or without spaces match.
+    const deptPattern = department.replace(/\s+/g, "\\s*");
+    const regexStatus = new RegExp(`^${deptPattern}$`, "i");
 
     // Helper to create $or clauses
     const makeFieldEntries = (fieldPath: string): Record<string, string>[] => {
@@ -91,9 +93,12 @@ export async function GET(req: NextRequest) {
       if (employeeCode) {
         const codeField = fieldPath.replace(/\.employeeId$/, ".employeeCode");
         const nameField = fieldPath.replace(/\.employeeId$/, ".employeeName");
-        entries.push({ [fieldPath]: employeeCode });
+        const managerField = fieldPath.replace(/\.employeeId$/, ".managerId");
+        // try matching code against multiple possible fields
+        entries.push({ [fieldPath]: employeeCode }); // sometimes employeeId field stored as code
         entries.push({ [codeField]: employeeCode });
         entries.push({ [nameField]: employeeCode });
+        entries.push({ [managerField]: employeeCode }); // sometimes managerId stores the manager-code
       }
       return entries;
     };
@@ -120,12 +125,20 @@ export async function GET(req: NextRequest) {
       return true;
     });
 
+    if (dedupedOr.length === 0) {
+      console.log("⚠️ No valid $or clauses were built — returning empty result");
+      console.groupEnd();
+      return NextResponse.json({ success: true, count: 0, leads: [] }, { status: 200 });
+    }
+
     const query = {
       $or: dedupedOr,
       currentStatus: regexStatus,
     };
 
-    console.log("🧠 Built Query Object:", JSON.stringify(query, null, 2));
+    // Logging note: JSON.stringify hides RegExp content, so log both separately for clarity
+    console.log("🧠 Built $or clauses:", JSON.stringify(dedupedOr, null, 2));
+    console.log("🧠 currentStatus regex:", regexStatus.toString());
 
     // Fetch leads (typed)
     const fetchedLeads = (await Lead.find(query).lean().exec()) as FetchedLead[];

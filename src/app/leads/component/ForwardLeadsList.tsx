@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ForwardLeadsTable, { Lead as FrontLead } from "./ForwardLeadsTable";
 import { Lead as BackendLead } from "@/types/leads";
+import EmployeeSelect from "./selectEmployee";
 
 type UserRole = "admin" | "manager" | "employee";
 
@@ -70,6 +71,7 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
   employees = [],
   onDelete,
   onForward,
+  employeeCode,
 }) => {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [managerIdInput, setManagerIdInput] = useState<string>("");
@@ -349,17 +351,15 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
           </>
         )}
 
-        {/* Manager UI */}
+        {/* Manager UI - replaced input with EmployeeSelect (keeps managerIdInput setter in place) */}
         {role === "manager" && (
           <>
-            <input
-              type="text"
-              placeholder="Enter employee ID to forward to"
-              className="border rounded-md px-3 py-2"
-              value={managerIdInput}
-              onChange={(e) => setManagerIdInput(e.target.value)}
-              aria-label="Employee ID"
-            />
+            <div className="w-64">
+              <EmployeeSelect
+                managerId={employeeCode}
+                onSelect={(emp) => setManagerIdInput(emp?.empId ?? "")}
+              />
+            </div>
 
             <button
               onClick={handleForwardClick}

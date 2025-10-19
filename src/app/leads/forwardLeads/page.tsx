@@ -96,13 +96,10 @@ export default function ForwardLeadsPage() {
         console.log("✅ Leads forwarded successfully!", data);
         alert("Leads forwarded successfully!");
         await fetchLeads(); // Refresh leads
-      } else {
-        console.error("❌ Failed to forward leads:", data.message);
-        alert("Failed to forward leads: " + (data.message || "Unknown error"));
       }
     } catch (err) {
       console.error("❌ Error forwarding leads:", err);
-      alert("Error forwarding leads. Check console for details.");
+      alert("Error forwarding leads"+err);
     }
   };
 

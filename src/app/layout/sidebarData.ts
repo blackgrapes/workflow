@@ -72,11 +72,9 @@ export const managerSidebar: SidebarItem[] = [
     icon: ClipboardType,
     children: [
       { name: "All Leads", href: "/employee/all-leads", icon: ListChecks },
-      { name: "Pending Leads", href: "/manager/pending-leads", icon: Inbox },
       { name: "Forwarded Leads", href: "/leads/forwardLeads", icon: ArrowRightCircle },
     ],
   },
-  { name: "Reports", href: "/manager/reports", icon: FileDown },
 ];
 
 // ================= CUSTOMER SERVICE =================
