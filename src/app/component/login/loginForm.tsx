@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useState } from "react";
-import { User, ShieldCheck, Building2, LogIn, Loader2 } from "lucide-react";
+import { User, ShieldCheck, Building2, LogIn, Loader2, Eye, EyeOff } from "lucide-react";
 
 // Employee type
 export type EmployeeType = "employee" | "manager" | "admin";
@@ -15,6 +15,7 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
   const [empId, setEmpId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Type icons & colors
   const typeStyles: Record<EmployeeType, { icon: ReactNode; bg: string }> = {
@@ -91,15 +92,24 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
           <label htmlFor="password" className="block text-gray-700 font-medium mb-2">
             Password
           </label>
-          <input
-            id="password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="w-full border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
+          <div className="relative">
+            <input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full border rounded-lg px-4 py-3 pr-12 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
 
         {/* Submit Button */}

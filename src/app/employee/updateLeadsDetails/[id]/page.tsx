@@ -11,18 +11,10 @@ import {
 } from "@/lib/frontendApis/employees/apis";
 
 import SourcingForm from "../../component/departmentDetailsUpdate/SourcingForm";
-import type { Lead, Sourcing } from "@/types/leads";
+import ShippingForm from "../../component/departmentDetailsUpdate/ShippingForm";
 
-// Base props for Sourcing form
-interface BaseFormProps {
-  employeeId: string;
-  employeeName: string;
-  employeeMongoId: string;
-  inquiryData?: Sourcing;
-  uploading: boolean;
-  onFileUpload: (files: FileList) => Promise<string[]>;
-  onSubmit: (formData: Sourcing) => Promise<void>;
-}
+import type { Lead, Sourcing, Sales, Shipping } from "@/types/leads";
+import SalesForm from "../../component/departmentDetailsUpdate/salesForm";
 
 export default function DepartmentInquiryPage() {
   const params = useParams();
@@ -35,28 +27,68 @@ export default function DepartmentInquiryPage() {
   const [loadingData, setLoadingData] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
 
+  const [salesData, setSalesData] = useState<Sales | undefined>(undefined);
+
+  // 🔹 Shipping state matches ShippingForm expected type
+  const [shippingData, setShippingData] = useState<{
+    itemName?: string;
+    shipmentMode?: string;
+    freightRate?: number;
+  } | undefined>(undefined);
+
   useEffect(() => {
     if (!leadId) return;
 
     setLoadingData(true);
     getLeadById(leadId)
-      .then((res) => setInquiryData(res))
+      .then((res) => {
+        if (!res) return;
+
+        setInquiryData(res);
+
+        // ✅ Map shipping data to match ShippingForm props
+        if (res.shipping) {
+          const shippingObj: Shipping = Array.isArray(res.shipping)
+            ? res.shipping[0]
+            : res.shipping;
+          setShippingData({
+            itemName: shippingObj.itemName ?? "",
+            shipmentMode: shippingObj.shipmentMode ?? "",
+            freightRate: shippingObj.freightRate
+              ? Number(shippingObj.freightRate)
+              : undefined,
+          });
+        } else {
+          setShippingData(undefined);
+        }
+
+        setSalesData(res.sales ?? undefined);
+      })
       .catch((err) => console.error("Error fetching inquiry:", err))
       .finally(() => setLoadingData(false));
   }, [leadId]);
 
   if (loading) return <LoadingSkeleton />;
   if (!session)
-    return <p className="text-center mt-20 text-red-500">You must be logged in to access this page.</p>;
+    return (
+      <p className="text-center mt-20 text-red-500">
+        You must be logged in to access this page.
+      </p>
+    );
   if (loadingData) return <LoadingSkeleton />;
   if (!leadId)
-    return <p className="text-center mt-20 text-red-500">Lead ID not found in URL!</p>;
+    return (
+      <p className="text-center mt-20 text-red-500">
+        Lead ID not found in URL!
+      </p>
+    );
 
   const employeeId = session.employeeId ?? "";
   const employeeName = session.name ?? "";
   const managerId = session.mongoId ?? "";
+  const department = session.department?.toLowerCase() ?? "";
 
-  // File upload handler
+  // 🔹 File upload handler
   const handleFileUpload = async (files: FileList): Promise<string[]> => {
     setUploadingFiles(true);
     const uploadedUrls: string[] = [];
@@ -75,19 +107,21 @@ export default function DepartmentInquiryPage() {
     return uploadedUrls;
   };
 
-  // Submit handler
+  // 🔹 Submit handler (for Sourcing only, Shipping updates internally)
   const handleSubmit = async (formData: Sourcing) => {
     try {
       const payload = {
         leadId,
         employeeId,
         managerId,
-        department: "sourcing",
-        data: formData as unknown as Record<string, unknown>
+        department,
+        data:
+          department === "sourcing"
+            ? { ...formData }
+            : { shipping: shippingData },
       };
 
       const result = await submitDepartmentData(payload);
-
       if (result.success) alert("Data submitted successfully!");
       else alert(`Failed to submit: ${result.message}`);
     } catch (err) {
@@ -99,20 +133,60 @@ export default function DepartmentInquiryPage() {
   const inquiryDataForForm = inquiryData?.sourcing;
 
   return (
-    <div className="max-w-4xl mx-auto p-4">
+    <div className="max-w-5xl mx-auto p-4 space-y-8">
       <h1 className="text-xl font-bold mb-4">
-        {leadId ? "Edit" : "Add"} Sourcing Inquiry
+        {leadId ? "Edit" : "Add"} {department?.toUpperCase()} Inquiry
       </h1>
 
-      <SourcingForm
-        employeeId={employeeId}
-        employeeName={employeeName}
-        employeeMongoId={managerId}
-        inquiryData={inquiryDataForForm}
-        uploading={uploadingFiles}
-        onFileUpload={handleFileUpload}
-        onSubmit={handleSubmit}
-      />
+      {/* 🔹 Sourcing */}
+      {department === "sourcing" && inquiryDataForForm && (
+        <SourcingForm
+          employeeId={employeeId}
+          employeeName={employeeName}
+          employeeMongoId={managerId}
+          inquiryData={inquiryDataForForm}
+          uploading={uploadingFiles}
+          onFileUpload={handleFileUpload}
+          onSubmit={handleSubmit}
+        />
+      )}
+
+      {/* 🔹 Shipping */}
+      {department === "shipping" && (
+        <div className="mt-10 border-t pt-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">
+            Shipping Details
+          </h2>
+          <ShippingForm
+            initialData={shippingData}
+            employeeId={employeeId}
+            managerId={managerId}
+            leadId={leadId}
+            onUpdateSuccess={() => {
+              alert("Shipping info updated!");
+            }}
+          />
+        </div>
+      )}
+
+      {/* 🔹 Sales */}
+      {department === "sales" && (
+        <div className="mt-10 border-t pt-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">
+            Sales Details
+          </h2>
+          <SalesForm
+            inquiryData={salesData}
+            employeeId={employeeId}
+            employeeName={employeeName}
+            employeeMongoId={managerId}
+            uploading={uploadingFiles}
+            onFileUpload={handleFileUpload}
+             leadId={leadId}
+          />
+        </div>
+      )}
     </div>
   );
 }
+

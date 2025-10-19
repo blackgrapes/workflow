@@ -29,6 +29,7 @@ export interface CustomerService {
   employeeId?: ObjectId | string;
   managerId?: ObjectId | string;
   logs: Log[];
+  marka?: string; 
 }
 
 // Sourcing type
@@ -62,6 +63,7 @@ export interface Shipping {
   employeeId?: ObjectId | string;
   managerId?: ObjectId | string;
   freightRate?: number;
+   marka?: string; 
   logs: Log[];
 }
 
@@ -82,6 +84,8 @@ export interface AssignedEmployee {
 
 // Lead type
 export interface Lead {
+  uploadFiles: string[];
+  marka: string;
   _id: ObjectId | string;
   leadId: string;
   currentStatus?: string; // "Customer Service", "Sourcing", "Shipping", "Sales"

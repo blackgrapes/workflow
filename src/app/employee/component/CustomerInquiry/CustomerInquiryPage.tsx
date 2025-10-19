@@ -11,7 +11,7 @@ export interface Product {
   size: string;
   usage: string;
   price: string;
-  imageUrl?: string; // added for Cloudinary image
+  imageUrl?: string; // for Cloudinary image
 }
 
 interface CustomerInquiryPageProps {
@@ -22,29 +22,30 @@ interface CustomerInquiryPageProps {
     shippingInfo?: Record<string, string>;
     employeeId?: string;
     employeeName?: string;
+    employeeMongoId?: string; // ✅ MongoDB ObjectId
   }) => void;
   employeeId?: string;
   employeeName?: string;
+  employeeMongoId?: string; // ✅ MongoDB ObjectId
 }
 
 export default function CustomerInquiryPage({
   onSubmit,
   employeeId,
   employeeName,
+  employeeMongoId,
 }: CustomerInquiryPageProps) {
   const [tab, setTab] = useState<"sourcing" | "shipping">("sourcing");
-  const [products, setProducts] = useState<Product[]>([
-    { id: 1, name: "", qty: "", size: "", usage: "", price: "" },
-  ]);
-  const [customerInfo, setCustomerInfo] = useState<Record<string, string>>({});
   const [shippingInfo, setShippingInfo] = useState<Record<string, string>>({});
 
-  const handleSourcingSubmit = () => {
-    onSubmit({ type: "sourcing", customerInfo, products, employeeId, employeeName });
-  };
-
   const handleShippingSubmit = () => {
-    onSubmit({ type: "shipping", customerInfo: shippingInfo, employeeId, employeeName });
+    onSubmit({
+      type: "shipping",
+      customerInfo: shippingInfo,
+      employeeId,
+      employeeName,
+      employeeMongoId,
+    });
   };
 
   return (
@@ -82,16 +83,16 @@ export default function CustomerInquiryPage({
           </button>
         </div>
 
+        {/* Independent Sourcing Form */}
         {tab === "sourcing" && (
           <ProductSourcingForm
-            products={products}
-            setProducts={setProducts}
-            customerInfo={customerInfo}
-            setCustomerInfo={setCustomerInfo}
-            onSubmit={handleSourcingSubmit}
+            employeeId={employeeId}
+            employeeName={employeeName}
+            employeeMongoId={employeeMongoId} // ✅ Pass MongoDB ID
           />
         )}
 
+        {/* Shipping form */}
         {tab === "shipping" && (
           <ShippingHelpForm
             shippingInfo={shippingInfo}

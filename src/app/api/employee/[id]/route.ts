@@ -3,7 +3,7 @@
   import { connectDB } from "@/lib/mongodb";
   import Lead from "@/models/lead";
 
-  export async function GET(req: NextRequest) {
+  export async function GET() {
     try {
 
       await connectDB();

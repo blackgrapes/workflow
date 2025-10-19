@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Eye, Search, Calendar, Box, User2 } from "lucide-react";
+import { ChevronDown, ChevronUp,  Search, Calendar,  User2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Lead } from "@/types/leads";
 
@@ -10,6 +10,7 @@ interface EmployeeAllLeadsProps {
   employeeCode?: string;
   department: string;
   leads: Lead[];
+  isAdmin?: boolean;
 }
 
 export default function EmployeeAllLeads({
@@ -17,6 +18,7 @@ export default function EmployeeAllLeads({
   employeeCode = "",
   department,
   leads,
+  isAdmin = false,
 }: EmployeeAllLeadsProps) {
   const router = useRouter();
   const [expandedRows, setExpandedRows] = useState<string[]>([]);
@@ -52,6 +54,18 @@ export default function EmployeeAllLeads({
   useEffect(() => {
     const deptKey = normalizeDeptKey(department);
     const searchTerm = (search || "").trim().toLowerCase();
+
+    // If admin, show all leads (only apply search filter)
+    if (isAdmin) {
+      const filtered = leads.filter((lead) => {
+        const customerName = String(lead.customerService?.customerName ?? "").toLowerCase();
+        const matchesSearch = searchTerm === "" ? true : customerName.includes(searchTerm);
+        return matchesSearch;
+      });
+
+      setFilteredLeads(filtered);
+      return;
+    }
 
     const filtered = leads.filter((lead) => {
       const csEmpId = lead.customerService?.employeeId;
@@ -94,7 +108,7 @@ export default function EmployeeAllLeads({
     });
 
     setFilteredLeads(filtered);
-  }, [leads, employeeMongoId, employeeCode, department, search]);
+  }, [leads, employeeMongoId, employeeCode, department, search, isAdmin]);
 
   const sortedLeads = useMemo(() => {
     const copy = [...filteredLeads];

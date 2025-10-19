@@ -51,6 +51,18 @@ const isActionAllowedForUser = (role: UserRole, dept: string) => {
   );
 };
 
+interface BackendLeadShape {
+  _id?: unknown;
+  leadId?: string;
+  customerService?: { customerName?: string; contactNumber?: string };
+  currentStatus?: string;
+  currentAssignedEmployee?: { employeeName?: string };
+}
+
+/** Type guard for an API error object shape we might get back from backend */
+const isApiError = (v: unknown): v is { message?: string } =>
+  typeof v === "object" && v !== null && "message" in v;
+
 const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
   role,
   department,
@@ -64,26 +76,21 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
   const [forwardDept, setForwardDept] = useState<string>("");
   const [selectedEmployee, setSelectedEmployee] = useState<string>("");
 
+  // Local state copy of leads for instant UI update on delete
+  const [localLeads, setLocalLeads] = useState<FrontLead[]>([]);
+
   const allowedActions = useMemo(
     () => isActionAllowedForUser(role, department),
     [role, department]
   );
 
-  interface BackendLeadShape {
-    _id?: unknown;
-    leadId?: string;
-    customerService?: { customerName?: string; contactNumber?: string };
-    currentStatus?: string;
-    currentAssignedEmployee?: { employeeName?: string };
-  }
-
-  const leads: FrontLead[] = useMemo(() => {
-    return backendLeads.map((lead) => {
+  // Initialize local leads state whenever backendLeads prop changes
+  useEffect(() => {
+    const frontLeads = backendLeads.map((lead) => {
       const l = lead as unknown as BackendLeadShape;
       const id = toStringId(l._id);
       const leadId = l.leadId ?? id ?? "";
-
-      const front: FrontLead = {
+      return {
         _id: id,
         leadId,
         customerService: l.customerService ? { ...l.customerService } : undefined,
@@ -91,12 +98,12 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
         currentAssignedEmployee: l.currentAssignedEmployee
           ? { ...l.currentAssignedEmployee }
           : undefined,
-      };
-      return front;
+      } as FrontLead;
     });
+    setLocalLeads(frontLeads);
   }, [backendLeads]);
 
-  const filteredLeads = useMemo(() => leads, [leads]);
+  const filteredLeads = useMemo(() => localLeads, [localLeads]);
 
   const toggleSelect = (id: string) => {
     setSelectedLeadIds((prev) => {
@@ -123,13 +130,69 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     }
   };
 
-  const handleDelete = (lead: FrontLead) => {
-    if (onDelete) {
-      onDelete(lead);
+  // --- Delete helper: sends DELETE to backend ---
+  const deleteLeadById = async (id: string): Promise<boolean> => {
+    if (!id) {
+      alert("Invalid lead id");
+      return false;
+    }
+    try {
+      const encodedId = encodeURIComponent(id);
+      const res = await fetch(`/api/leads/${encodedId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      // parse JSON safely
+      let parsed: unknown = undefined;
+      try {
+        parsed = await res.json();
+      } catch {
+        // ignore parse errors - some endpoints return empty body
+        parsed = undefined;
+      }
+
+      if (!res.ok) {
+        const message =
+          (isApiError(parsed) && parsed.message) ||
+          res.statusText ||
+          "Failed to delete";
+        console.error("Delete failed", message);
+        alert(`Failed to delete lead: ${message}`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("Network/error deleting lead:", err);
+      alert("Network error while deleting lead.");
+      return false;
+    }
+  };
+
+  const handleDelete = async (lead: FrontLead) => {
+    const leadIdOrDbId = (lead._id && String(lead._id)) || lead.leadId || "";
+    if (!leadIdOrDbId) {
+      alert("Cannot determine lead id to delete.");
       return;
     }
-    if (confirm(`Delete lead ${lead.leadId}? This action cannot be undone.`)) {
-      console.log("Deleted", lead._id);
+
+    const confirmed = confirm(`Are you sure you want to delete lead "${lead.leadId}"?`);
+    if (!confirmed) return;
+
+    const ok = await deleteLeadById(leadIdOrDbId);
+    if (!ok) return;
+
+    // Update local state immediately
+    setLocalLeads((prev) => prev.filter((l) => l._id !== lead._id));
+
+    // Call parent handler if provided
+    if (onDelete) {
+      try {
+        onDelete(lead);
+      } catch (err) {
+        // Keep logging but don't crash UI
+        console.error("onDelete handler threw:", err);
+      }
     }
   };
 
@@ -154,6 +217,7 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
     return [{ id: "all", label: "All employees" }, ...opts];
   }, [employees]);
 
+  // set sensible defaults for forwardDept depending on role
   useEffect(() => {
     if (role === "employee" && forwardOptionsForEmployee.length > 0 && !forwardDept) {
       setForwardDept(forwardOptionsForEmployee[0]);
@@ -251,7 +315,7 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
           </>
         )}
 
-        {/* Admin UI (added department dropdown same as employee) */}
+        {/* Admin UI */}
         {role === "admin" && (
           <>
             <input
@@ -309,7 +373,7 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
 
       {/* Leads table */}
       <ForwardLeadsTable
-        leads={leads}
+        leads={localLeads}
         filteredLeads={filteredLeads}
         searchTerm={""}
         setSearchTerm={() => {}}

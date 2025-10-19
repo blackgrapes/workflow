@@ -1,3 +1,4 @@
+// sidebarData.ts
 import {
   LayoutDashboard,
   Users,
@@ -12,7 +13,6 @@ import {
 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 
-// ✅ Sidebar Item type with optional children for nested submenu
 export type SidebarItem = {
   name: string;
   href?: string;
@@ -31,20 +31,12 @@ export const adminSidebar: SidebarItem[] = [
       { name: "Add Employee", href: "/admin/employees/add", icon: UserPlus },
     ],
   },
-{
+  {
     name: "Manage Leads",
     icon: ClipboardType,
     children: [
-      {
-        name: "All Leads",
-        href: "/employee/all-leads",
-        icon: ListChecks,
-      },
-      {
-        name: "Pending / Not Forwarded",
-        href: "/leads/forwardLeads",
-        icon: Inbox,
-      },
+      { name: "All Leads", href: "/employee/all-leads", icon: ListChecks },
+      { name: "Pending / Not Forwarded", href: "/leads/forwardLeads", icon: Inbox },
     ],
   },
   { name: "Audit Logs", href: "/admin/logs", icon: ClipboardList },
@@ -52,41 +44,21 @@ export const adminSidebar: SidebarItem[] = [
 
 // ================= EMPLOYEE =================
 export const employeeSidebar: SidebarItem[] = [
-  {
-    name: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-  },
-  {
-    name: "Add Leads",
-    href: "/employee/add-leads",
-    icon: PlusCircle,
-  },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  // "Add Leads" will only appear for Customer Service role (handled in Sidebar component)
   {
     name: "Manage Leads",
     icon: ClipboardType,
     children: [
-      {
-        name: "All Leads",
-        href: "/employee/all-leads",
-        icon: ListChecks,
-      },
-      {
-        name: "Pending / Not Forwarded",
-        href: "/leads/forwardLeads",
-        icon: Inbox,
-      },
+      { name: "All Leads", href: "/employee/all-leads", icon: ListChecks },
+      { name: "Pending / Not Forwarded", href: "/leads/forwardLeads", icon: Inbox },
     ],
   },
 ];
 
 // ================= MANAGER =================
 export const managerSidebar: SidebarItem[] = [
-  {
-    name: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-  },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   {
     name: "Team Management",
     icon: Users,
@@ -99,18 +71,24 @@ export const managerSidebar: SidebarItem[] = [
     name: "Leads Management",
     icon: ClipboardType,
     children: [
-      { name: "All Leads", href: "/manager/all-leads", icon: ListChecks },
+      { name: "All Leads", href: "/employee/all-leads", icon: ListChecks },
       { name: "Pending Leads", href: "/manager/pending-leads", icon: Inbox },
-      {
-        name: "Forwarded Leads",
-        href: "/leads/forwardLeads",
-        icon: ArrowRightCircle,
-      },
+      { name: "Forwarded Leads", href: "/leads/forwardLeads", icon: ArrowRightCircle },
     ],
   },
+  { name: "Reports", href: "/manager/reports", icon: FileDown },
+];
+
+// ================= CUSTOMER SERVICE =================
+export const customerServiceSidebar: SidebarItem[] = [
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Add Leads", href: "/employee/add-leads", icon: PlusCircle },
   {
-    name: "Reports",
-    href: "/manager/reports",
-    icon: FileDown,
+    name: "Manage Leads",
+    icon: ClipboardType,
+    children: [
+      { name: "All Leads", href: "/employee/all-leads", icon: ListChecks },
+      { name: "Pending / Not Forwarded", href: "/leads/forwardLeads", icon: Inbox },
+    ],
   },
 ];

@@ -55,7 +55,6 @@ const ForwardLeadsTable: React.FC<ForwardLeadsTableProps> = ({
   selectedLeadIds,
   role,
   department,
-  allowedActions = false,
   toggleSelect,
   toggleSelectAll,
   handleDelete,
@@ -155,7 +154,7 @@ const ForwardLeadsTable: React.FC<ForwardLeadsTableProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/leads/view/${id}`);
+                          router.push(`/leads/${id}`);
                         }}
                         className="text-sm px-3 py-1 rounded-md border hover:bg-gray-50"
                         title="View Lead"

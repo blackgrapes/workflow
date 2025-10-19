@@ -37,7 +37,6 @@ export function useSession() {
         });
 
         if (!res.ok) {
-          console.warn("❌ No valid session, redirecting to login");
           router.push("/");
           return;
         }
@@ -48,7 +47,6 @@ export function useSession() {
         // Check token expiry
         const currentTime = Date.now() / 1000;
         if (data.exp < currentTime) {
-          console.warn("⚠️ Token expired, redirecting to login");
           router.push("/");
           return;
         }
@@ -65,14 +63,6 @@ export function useSession() {
           name: data.name,
         };
 
-        // 🔹 Debug: check if MongoDB ID exists
-        if (normalizedSession.mongoId) {
-          console.log("🟢 MongoDB ObjectId exists:", normalizedSession.mongoId);
-        } else {
-          console.warn("❌ MongoDB ObjectId is missing!");
-        }
-
-        console.log("🟢 Normalized session:", normalizedSession);
         setSession(normalizedSession);
       } catch (err) {
         console.error("❌ Session fetch error:", err);

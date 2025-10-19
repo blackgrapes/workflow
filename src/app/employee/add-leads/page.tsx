@@ -23,6 +23,7 @@ export default function CustomerInquiry() {
   const employeeId = session.employeeId; // legacy ID
   const employeeName = session.name;
   const employeeMongoId = session.mongoId; // ✅ MongoDB ObjectId
+
   // Handle form submission
   const handleSubmit = async (data: {
     type: "sourcing" | "shipping";
@@ -62,6 +63,7 @@ export default function CustomerInquiry() {
       onSubmit={handleSubmit}
       employeeId={employeeId}
       employeeName={employeeName}
+      employeeMongoId={employeeMongoId} // ✅ pass MongoDB ID to child
     />
   );
 }

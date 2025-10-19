@@ -53,6 +53,7 @@ export interface CustomerService {
   address?: string;
   city?: string;
   state?: string;
+  marka?: string; // <-- added shipping mark for customer (e.g., DTC-AM)
   products: Product[];
   employeeId?: Types.ObjectId | string;
   managerId?: Types.ObjectId | string;
@@ -66,6 +67,7 @@ const CustomerServiceSchema = new Schema<CustomerService>(
     address: String,
     city: String,
     state: String,
+    marka: String, // <-- schema field
     products: [ProductSchema],
     employeeId: { type: Schema.Types.Mixed },
     managerId: { type: Schema.Types.Mixed },
@@ -124,6 +126,7 @@ export interface Shipping {
   shipmentMode?: string;
   uploadInvoice?: string;
   uploadPackingList?: string;
+  marka?: string; // <-- added shipping mark here as well (optional)
   employeeId?: Types.ObjectId | string;
   managerId?: Types.ObjectId | string;
   freightRate?: number;
@@ -142,6 +145,7 @@ const ShippingSchema = new Schema<Shipping>(
     shipmentMode: String,
     uploadInvoice: String,
     uploadPackingList: String,
+    marka: String, // <-- schema field
     employeeId: { type: Schema.Types.Mixed },
     managerId: { type: Schema.Types.Mixed },
     freightRate: Number,

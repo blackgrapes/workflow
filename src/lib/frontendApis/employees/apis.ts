@@ -117,36 +117,131 @@ export async function getForwardEmployeeLeads(mongoId: string | null, department
 
 
 // upload file to cloudinary global api 
-export async function uploadToCloudinary(file: File): Promise<string> {
+// upload file to cloudinary global api 
+// Upload file to Cloudinary with type detection and debug logs
+export async function uploadToCloudinary(
+  file: File,
+  options?: { folder?: string }
+): Promise<string> {
+  // Strict TypeScript: returns Promise<string> (secure URL)
   try {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append(
-      "upload_preset",
-      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "ml_default"
-    );
+    console.log("🚀 Upload started:", file.name, "(", file.type, ")");
 
+    // Helper: sanitize filename (keeps ascii letters, numbers, dot, dash, underscore)
+    const getSafeFileName = (name: string): string => {
+      // keep extension, replace other chars with underscore
+      const parts = name.split(".");
+      if (parts.length === 1) {
+        return name.replace(/[^a-zA-Z0-9_\-]/g, "_");
+      }
+      const ext = parts.pop();
+      const base = parts.join(".");
+      const safeBase = base.replace(/[^a-zA-Z0-9_\-]/g, "_");
+      // limit length to avoid extremely long public_ids
+      const maxBaseLen = 120;
+      const trimmedBase = safeBase.length > maxBaseLen ? safeBase.slice(0, maxBaseLen) : safeBase;
+      return `${trimmedBase}.${ext}`;
+    };
+
+    // Validate cloud name
     const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
-    if (!cloudName) throw new Error("Cloudinary cloud name is not defined");
+    if (!cloudName) {
+      throw new Error("Cloudinary cloud name is not defined (NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME).");
+    }
 
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/upload`;
+    // Validate upload preset (for unsigned uploads). If you use signed uploads this must be handled server-side.
+    const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "ml_default";
 
+    // Detect resource type: prefer extension fallback if file.type is empty/incorrect
+    const lowerType = (file.type || "").toLowerCase();
+    const nameLower = file.name.toLowerCase();
+    const ext = nameLower.split(".").pop() ?? "";
+
+    const isPdf = lowerType.includes("pdf") || ext === "pdf";
+    const isImage = lowerType.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "gif", "svg"].includes(ext);
+    const isVideo = lowerType.startsWith("video/") || ["mp4", "mov", "mkv"].includes(ext);
+
+    // For PDF/docs make sure Cloudinary treats them as 'raw'
+    const resourceType = isPdf || (!isImage && !isVideo && ext.length > 0 && ext !== "svg") ? "raw" : "auto";
+
+    // Build endpoint URL (resourceType in path)
+    const url = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
+
+    // Build FormData correctly — include sanitized filename to avoid special char problems
+    const safeName = getSafeFileName(file.name);
+    const formData = new FormData();
+    // Append file with explicit filename
+    formData.append("file", file, safeName);
+    formData.append("upload_preset", uploadPreset);
+
+    // Optional folder
+    if (options?.folder) {
+      formData.append("folder", options.folder);
+    }
+
+    // Optional: keep original filename as public_id prefix to help identify files (timestamp prevents collisions)
+    // But do not set public_id with unsafe characters; if you want to set public_id uncomment below:
+    // const publicId = `${safeName.replace(/\.[^/.]+$/, "")}_${Date.now()}`;
+    // formData.append("public_id", publicId);
+
+    // Execute request
     const res = await fetch(url, {
       method: "POST",
       body: formData,
     });
 
     if (!res.ok) {
-      throw new Error(`Cloudinary upload failed: ${res.statusText}`);
+      // try to extract JSON error body if present
+      const text = await res.text();
+      // include status and body for easier debugging
+      throw new Error(`Cloudinary upload failed: ${res.status} ${res.statusText} — ${text}`);
     }
 
-    const data = await res.json();
-    return data.secure_url as string;
+    // Parse response
+    const data = (await res.json()) as {
+      secure_url?: string;
+      url?: string;
+      resource_type?: string;
+      bytes?: number;
+      public_id?: string;
+      [key: string]: unknown;
+    };
+
+    const fileUrl = (data.secure_url || data.url) as string | undefined;
+    if (!fileUrl) {
+      throw new Error("Cloudinary response did not include a secure URL.");
+    }
+
+    // Debug logs
+    console.log(
+      isPdf ? "📄 Uploaded PDF successfully:" : isImage ? "🖼️ Uploaded image successfully:" : "📁 Uploaded other file type successfully:",
+      fileUrl
+    );
+    console.log("✅ Cloudinary upload complete:", {
+      name: file.name,
+      safeName,
+      type: file.type,
+      sizeKB: (file.size / 1024).toFixed(2) + " KB",
+      url: fileUrl,
+      resourceType: data.resource_type ?? resourceType,
+      bytes: data.bytes ?? null,
+      public_id: data.public_id ?? null,
+    });
+
+    // Final verification: if we uploaded a PDF, ensure Cloudinary stored it as 'raw'
+    if (isPdf && String(data.resource_type || resourceType) !== "raw") {
+      console.warn("Uploaded PDF but Cloudinary reported resource_type !== 'raw'. URL may not render as PDF in-browser.");
+    }
+
+    return fileUrl;
   } catch (err) {
-    console.error("uploadToCloudinary error:", err);
+    console.error("❌ uploadToCloudinary error:", err);
     throw err;
   }
 }
+
+
+
 
 export interface DepartmentPayload {
   employeeId: string;

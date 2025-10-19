@@ -23,7 +23,7 @@ interface ProductInputProps {
 const ProductInput = ({ product, index, removeProduct, onChange, isRemovable = true }: ProductInputProps) => {
   return (
     <div className="border rounded-2xl p-6 bg-gray-50 shadow-md relative">
-      <h3 className="text-lg font-semibold mb-4 text-gray-800">Product {index + 1}</h3>
+      <h3 className="text-lg font-semibold mb-4 text-gray-800">Product {index }</h3>
       {isRemovable && removeProduct && (
         <button
           type="button"

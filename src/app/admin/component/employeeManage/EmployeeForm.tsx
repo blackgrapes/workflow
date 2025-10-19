@@ -20,7 +20,7 @@ interface EmployeeFormProps {
   defaultValues?: GlobalEmployeeData; // For edit mode
 }
 
-const DEPARTMENTS = ["Sales", "Shipment", "Customer Service", "Sourcing"];
+const DEPARTMENTS = ["Sales", "Shipping", "Customer Service", "Sourcing"];
 const EMPLOYEE_TYPES = ["Employee", "Manager"];
 
 export default function EmployeeForm({
@@ -51,6 +51,17 @@ export default function EmployeeForm({
     location: "",
   });
 
+  // Password change state — ONLY used in edit mode
+  const [changePassword, setChangePassword] = useState(false);
+  const [passwords, setPasswords] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passwordErrors, setPasswordErrors] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
+
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -59,19 +70,49 @@ export default function EmployeeForm({
     setErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
+  const handlePasswordChange = (field: keyof typeof passwords, value: string) => {
+    setPasswords((prev) => ({ ...prev, [field]: value }));
+    setPasswordErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
+  const validatePasswords = (): boolean => {
+    const errs = { newPassword: "", confirmPassword: "" };
+    let ok = true;
+    const np = passwords.newPassword.trim();
+    const cp = passwords.confirmPassword.trim();
+
+    if (np.length < 6) {
+      errs.newPassword = "Password should be at least 6 characters";
+      ok = false;
+    }
+    if (np !== cp) {
+      errs.confirmPassword = "Passwords do not match";
+      ok = false;
+    }
+
+    setPasswordErrors(errs);
+    return ok;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     // validate using your external validator which expects { name, role, phone, location }
-const { valid, errors: validationErrors } = validateEmployeeForm({
-  name: form.name,
-  role: form.role,
-  phone: form.phone,
-  location: form.location,
-});
+    const { valid, errors: validationErrors } = validateEmployeeForm({
+      name: form.name,
+      role: form.role,
+      phone: form.phone,
+      location: form.location,
+    });
 
     setErrors(validationErrors);
     if (!valid) return;
+
+    // if edit mode and changePassword is toggled, validate passwords
+    if (isEditMode && changePassword) {
+      const pwOk = validatePasswords();
+      if (!pwOk) return;
+    }
 
     setLoading(true);
 
@@ -79,12 +120,26 @@ const { valid, errors: validationErrors } = validateEmployeeForm({
     // - If editing => keep defaultValues' department/type (can't change)
     // - Else if creator is manager => department fixed to department prop, type fixed to Employee
     // - Else admin creating => use selected values in form
-    const finalDepartment = defaultValues?.department || (isCreatorManager ? department || form.department : form.department);
-    const finalType = defaultValues?.type ? (defaultValues.type as EmployeeType) : (isCreatorManager ? ("Employee" as EmployeeType) : (form.employeeType as EmployeeType));
+    const finalDepartment =
+      defaultValues?.department || (isCreatorManager ? department || form.department : form.department);
+    const finalType = defaultValues?.type
+      ? (defaultValues.type as EmployeeType)
+      : (isCreatorManager ? ("Employee" as EmployeeType) : (form.employeeType as EmployeeType));
+
+    // Password determination:
+    // - Create mode => generatePassword()
+    // - Edit mode:
+    //    - if changePassword true => use entered newPassword
+    //    - else keep defaultValues?.password (unchanged)
+    const finalPassword = isEditMode
+      ? changePassword
+        ? passwords.newPassword
+        : defaultValues?.password || generatePassword()
+      : generatePassword();
 
     const employeeData: GlobalEmployeeData = {
       empId: defaultValues?.empId || generateEmployeeId(finalDepartment, finalType),
-      password: defaultValues?.password || generatePassword(),
+      password: finalPassword,
       status: defaultValues?.status || "Active",
       name: form.name,
       role: form.role,
@@ -99,14 +154,13 @@ const { valid, errors: validationErrors } = validateEmployeeForm({
     try {
       if (onSubmit) onSubmit(employeeData);
 
+      // show helpful alert — in edit mode we explicitly tell if password changed or not
       alert(
         `✅ Employee ${defaultValues ? "Updated" : "Created"}!\n\nID: ${
           employeeData.empId
-        }\nPassword: ${employeeData.password}\nType: ${
+        }\nPassword: ${isEditMode ? (changePassword ? employeeData.password : "[unchanged]") : employeeData.password}\nType: ${
           employeeData.type
-        }\nDepartment: ${employeeData.department}\nLocation: ${
-          employeeData.location
-        }\nCreated By: ${employeeData.createdByManagerId}`
+        }\nDepartment: ${employeeData.department}\nLocation: ${employeeData.location}\nCreated By: ${employeeData.createdByManagerId}`
       );
 
       router.push("/admin/employees");
@@ -216,6 +270,66 @@ const { valid, errors: validationErrors } = validateEmployeeForm({
         />
         {errors.location && <p className="text-red-600 text-sm mt-1">{errors.location}</p>}
       </div>
+
+      {/* Password update area — ONLY visible in edit mode */}
+      {isEditMode && (
+        <div className="md:col-span-2 border rounded-lg p-4 bg-white">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-lg font-medium">Update Password</h3>
+              <p className="text-sm text-gray-500">Only change if you want to update the employee password.</p>
+            </div>
+            <div>
+              <label className="inline-flex items-center">
+                <input
+                  type="checkbox"
+                  checked={changePassword}
+                  onChange={(e) => {
+                    setChangePassword(e.target.checked);
+                    // clear password fields & errors when toggling off
+                    if (!e.target.checked) {
+                      setPasswords({ newPassword: "", confirmPassword: "" });
+                      setPasswordErrors({ newPassword: "", confirmPassword: "" });
+                    }
+                  }}
+                  className="mr-2"
+                />
+                <span className="text-sm">Enable</span>
+              </label>
+            </div>
+          </div>
+
+          {changePassword && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex flex-col">
+                <label htmlFor="new-password" className="mb-1 font-medium text-gray-700">New Password</label>
+                <input
+                  id="new-password"
+                  type="password"
+                  placeholder="New Password"
+                  value={passwords.newPassword}
+                  onChange={(e) => handlePasswordChange("newPassword", e.target.value)}
+                  className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${passwordErrors.newPassword ? "border-red-500" : ""}`}
+                />
+                {passwordErrors.newPassword && <p className="text-red-600 text-sm mt-1">{passwordErrors.newPassword}</p>}
+              </div>
+
+              <div className="flex flex-col">
+                <label htmlFor="confirm-password" className="mb-1 font-medium text-gray-700">Confirm Password</label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  placeholder="Confirm Password"
+                  value={passwords.confirmPassword}
+                  onChange={(e) => handlePasswordChange("confirmPassword", e.target.value)}
+                  className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${passwordErrors.confirmPassword ? "border-red-500" : ""}`}
+                />
+                {passwordErrors.confirmPassword && <p className="text-red-600 text-sm mt-1">{passwordErrors.confirmPassword}</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Submit button */}
       <div className="md:col-span-2 mt-4">
