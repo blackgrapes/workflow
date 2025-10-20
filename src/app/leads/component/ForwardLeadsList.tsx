@@ -208,17 +208,6 @@ const ForwardLeadsList: React.FC<ForwardLeadsListProps> = ({
 
   const adminForwardDepartments = ["customerservice", "sourcing", "shipping", "sales"];
 
-  const adminEmployeeOptions = useMemo(() => {
-    const opts = employees
-      .map((e) => {
-        const id = e._id ?? e.employeeId ?? "";
-        const label = e.employeeName ?? e.employeeId ?? e._id ?? "Unknown";
-        return { id, label };
-      })
-      .filter((o) => !!o.id);
-    return [{ id: "all", label: "All employees" }, ...opts];
-  }, [employees]);
-
   // set sensible defaults for forwardDept depending on role
   useEffect(() => {
     if (role === "employee" && forwardOptionsForEmployee.length > 0 && !forwardDept) {

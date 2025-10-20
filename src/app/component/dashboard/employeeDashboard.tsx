@@ -18,9 +18,16 @@ interface EmployeeDashboardProps {
   department?: string;
 }
 
+interface LogEntry {
+  employeeId?: string;
+  employeeName?: string;
+  timestamp?: string;
+  comment?: string;
+}
+
 interface Lead {
-  currentStatus: string;
-  logs?: { employeeId?: string; timestamp?: string; comment?: string }[];
+  currentStatus?: string;
+  logs?: LogEntry[];
   createdAt: string;
   updatedAt?: string;
 }
@@ -28,13 +35,11 @@ interface Lead {
 type DayPoint = { day: string; count: number; key: string };
 
 function toKolkataDateKey(d: string | Date): string {
-  // produce YYYY-MM-DD for Asia/Kolkata
   const date = typeof d === "string" ? new Date(d) : d;
-  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // en-CA -> YYYY-MM-DD
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }
 
 function last7DaysKeys(): string[] {
-  // produce 7 keys: oldest -> newest
   const res: string[] = [];
   for (let i = 6; i >= 0; i--) {
     const ms = Date.now() - i * 24 * 60 * 60 * 1000;
@@ -43,34 +48,70 @@ function last7DaysKeys(): string[] {
   return res;
 }
 
-/** heuristics to decide if a lead was forwarded to shipping */
-function isForwardedToShipping(lead: Lead): boolean {
-  if (!lead.logs || lead.logs.length === 0) return false;
+function normalizeStatus(s?: string): string {
+  return (s ?? "").toString().trim().toLowerCase();
+}
 
-  // If currentStatus already not sourcing and there is a shipping-related log -> forwarded
-  const currentNotSourcing = lead.currentStatus && lead.currentStatus.toLowerCase() !== "sourcing";
+/**
+ * Decide if logs only contain a single creation entry (or no logs).
+ * Many of your CS-created leads will have a single "Created by ..." log.
+ */
+function isCreatedOnly(lead: Lead): boolean {
+  const logs = lead.logs ?? [];
+  if (logs.length === 0) return true;
+  if (logs.length === 1) {
+    const c = (logs[0].comment ?? "").toLowerCase();
+    if (/created by/i.test(c) || /created/i.test(c)) return true;
+  }
+  return false;
+}
 
-  const shippingMention = lead.logs.some((l) => {
+/**
+ * Detect if a lead was forwarded to other departments (sourcing/shipping/sales).
+ * - Look for explicit "forwarded to" mentions to sourcing/shipping/sales
+ * - Look for employee codes like SO-EMP / SH-EMP
+ * - Look for mentions of "sourcing" / "shipping" / "sales" in comments
+ *
+ * IMPORTANT: ignore internal customer-service forwards (comments that include 'customerservice' or 'customer service')
+ */
+function isForwardedToOtherDept(lead: Lead): boolean {
+  const logs = lead.logs ?? [];
+  // If currentStatus itself indicates shipping/sourcing/sales, treat as forwarded
+  const st = normalizeStatus(lead.currentStatus);
+  if (["shipping", "sourcing", "sales"].includes(st)) return true;
+
+  for (const l of logs) {
     const c = (l.comment ?? "").toLowerCase();
-    if (!c) return false;
-    if (c.includes("shipping") || c.includes("(shipping)")) return true;
-    if (c.includes("forwarded to") && c.includes("shipping")) return true;
-    // employee codes like "SH-EMP-1063"
-    if (/\bsh-emp\b/i.test(c) || /sh-emp-/i.test(c)) return true;
-    return false;
-  });
 
-  // If a shipping mention exists in logs, consider forwarded.
-  if (shippingMention) return true;
+    if (!c) continue;
+    // If comment explicitly mentions customerservice, skip (internal CS assignment)
+    const isCSMention = c.includes("customerservice") || c.includes("customer service") || c.includes("cs-emp") || c.includes("cs-mgr");
 
-  // Otherwise if current status moved off sourcing and there are logs that mention forwarded, consider forwarded.
-  const forwardedMention = lead.logs.some((l) => /forwarded to/i.test(l.comment ?? ""));
-  if (currentNotSourcing && forwardedMention) return true;
+    // check employee codes
+    if (/\bsh-emp\b/i.test(c) || /sh-emp-/i.test(c)) {
+      if (!isCSMention) return true;
+    }
+    if (/\bso-emp\b/i.test(c) || /so-emp-/i.test(c)) {
+      if (!isCSMention) return true;
+    }
+    if (/\bsales-emp\b/i.test(c) || /sales-emp-/i.test(c)) {
+      if (!isCSMention) return true;
+    }
+
+    // explicit forwarded to other dept (but ignore customerservice)
+    if (/forwarded to/i.test(c)) {
+      if (c.includes("shipping") || c.includes("sourcing") || c.includes("sales")) return true;
+      // sometimes comments don't include dept name but include emp codes (checked above)
+    }
+
+    // generic mentions of shipping/sourcing/sales
+    if (!isCSMention && (c.includes("shipping") || c.includes("sourcing") || c.includes("sales"))) return true;
+  }
 
   return false;
 }
 
-/** Small sparkline component (mini bars) — keeps the original color feel */
+/** Small sparkline component (mini bars) */
 function MiniSparkline({ points }: { points: number[] }) {
   const max = Math.max(...points, 1);
   return (
@@ -92,7 +133,6 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
   const [error, setError] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
 
-  // Fetch leads from your endpoint
   useEffect(() => {
     let mounted = true;
     async function fetchLeads() {
@@ -108,7 +148,7 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`API error ${res.status}`);
         const payload = await res.json();
-        if (!payload.success) throw new Error("Failed to load leads");
+        if (!payload?.success) throw new Error("Failed to load leads");
         if (!mounted) return;
         setLeads(payload.data ?? []);
       } catch (err) {
@@ -125,9 +165,8 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
     };
   }, [employeeId, department]);
 
-  // compute summary
   const summary = useMemo(() => {
-    const keys = last7DaysKeys(); // oldest -> newest
+    const keys = last7DaysKeys();
     const dayMap: Record<string, number> = {};
     keys.forEach((k) => (dayMap[k] = 0));
 
@@ -139,28 +178,30 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
 
     const todayKey = toKolkataDateKey(new Date());
 
-    leads.forEach((ld) => {
+    for (const ld of leads) {
       totalLeads++;
       const logsCount = (ld.logs?.length ?? 0);
       const key = toKolkataDateKey(ld.createdAt);
       if (key in dayMap) dayMap[key]++;
 
-      // today's count
       if (key === todayKey) todayCount++;
 
-      // new / updated / forwarded logic
-      const isSourcing = (ld.currentStatus ?? "").toLowerCase() === "sourcing";
       const hasLogs = logsCount > 0;
-      const forwardedShipping = isForwardedToShipping(ld);
+      const status = normalizeStatus(ld.currentStatus);
 
-      if (isSourcing && !hasLogs) newLeads++;
-      else if (isSourcing && hasLogs) updatedLeads++;
-      else if (!isSourcing && forwardedShipping) forwardedLeads++;
-      else if (!isSourcing && hasLogs && !forwardedShipping) {
-        // if moved but no shipping mention, still treat as forwarded (safe fallback)
+      // Classification:
+      // 1) New: no logs OR single-created log
+      // 2) Forwarded: heuristics detect forwarding to sourcing/shipping/sales (or currentStatus indicates them)
+      // 3) Updated: has logs but not forwarded (i.e., CS internal updates)
+      if (!hasLogs || isCreatedOnly(ld)) {
+        newLeads++;
+      } else if (isForwardedToOtherDept(ld)) {
         forwardedLeads++;
+      } else {
+        // logs exist but not forwarded to other dept -> treat as "updated" within CS
+        updatedLeads++;
       }
-    });
+    }
 
     const dailyLeads: DayPoint[] = keys.map((k) => ({
       key: k,
@@ -178,11 +219,9 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
     };
   }, [leads]);
 
-  // small loading / error handling
   if (loading) return <div className="p-8 text-center text-gray-600">Loading dashboard...</div>;
   if (error) return <div className="p-8 text-center text-red-600">{error}</div>;
 
-  // build cards (keep your colors)
   const cards = [
     { name: "Total Leads", value: summary.totalLeads, icon: Users },
     { name: "New Leads", value: summary.newLeads, icon: PlusCircle },
@@ -195,7 +234,6 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 p-6 md:p-10">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
         <div className="rounded-2xl bg-white shadow-lg p-6 md:p-8 mb-6 border flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800">
@@ -210,12 +248,11 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
           <div className="flex items-center gap-3">
             <div className="text-sm text-slate-500 hidden md:block">Last updated:</div>
             <div className="bg-slate-100 px-3 py-2 rounded-lg text-sm text-slate-700">
-              {new Date().toLocaleString()}
+              {new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })}
             </div>
           </div>
         </div>
 
-        {/* Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
           {cards.map((c) => {
             const Icon = c.icon;
@@ -226,7 +263,6 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
                 ? Math.round((c.value / summary.totalLeads) * 100)
                 : 0;
 
-            // sparkline points from daily counts — rotate to most recent 7
             const sparkPoints = summary.dailyLeads.map((d) => d.count);
 
             return (
@@ -273,7 +309,6 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
           })}
         </div>
 
-        {/* small row: today's leads + quick stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-2xl p-4 shadow-sm border flex items-center justify-between">
             <div>
@@ -291,11 +326,11 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
             <div className="mt-2 flex items-center gap-6">
               <div>
                 <div className="text-lg font-semibold">{summary.newLeads}</div>
-                <div className="text-xs text-slate-500">New (no logs)</div>
+                <div className="text-xs text-slate-500">New (no logs / created)</div>
               </div>
               <div>
                 <div className="text-lg font-semibold">{summary.updatedLeads}</div>
-                <div className="text-xs text-slate-500">Updated (sourcing + logs)</div>
+                <div className="text-xs text-slate-500">Updated (CS-internal)</div>
               </div>
             </div>
           </div>
@@ -304,12 +339,11 @@ export default function EmployeeDashboard({ employeeId, department }: EmployeeDa
             <div className="text-sm text-slate-500">Forwarded</div>
             <div className="mt-2">
               <div className="text-2xl font-bold text-slate-900">{summary.forwardedLeads}</div>
-              <div className="text-xs text-slate-500 mt-1">Moved off sourcing (likely to shipping)</div>
+              <div className="text-xs text-slate-500 mt-1">Moved to sourcing/shipping/sales</div>
             </div>
           </div>
         </div>
 
-        {/* Last 7 days chart */}
         <div className="bg-white rounded-2xl p-6 shadow-sm border">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-slate-800">Leads in last 7 days</h3>

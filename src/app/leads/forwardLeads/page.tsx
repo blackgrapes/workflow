@@ -6,7 +6,6 @@ import LoadingSkeleton from "@/app/component/loading/loading";
 import ForwardLeadsList from "../component/ForwardLeadsList";
 import { Lead } from "@/types/leads";
 import {
-  getForwardEmployeeLeads,
   forwardLeads as forwardLeadsApi,
 } from "@/lib/frontendApis/employees/apis";
 

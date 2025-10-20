@@ -5,11 +5,11 @@ import {
   ListChecks,
   ClipboardList,
   ClipboardType,
-  FileDown,
   UserPlus,
   Inbox,
   ArrowRightCircle,
   PlusCircle,
+  User,
 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 
@@ -21,7 +21,7 @@ export type SidebarItem = {
 };
 
 // ================= ADMIN =================
-export const adminSidebar: SidebarItem[] = [
+ export const adminSidebar: SidebarItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   {
     name: "Employees Management",
@@ -40,8 +40,8 @@ export const adminSidebar: SidebarItem[] = [
     ],
   },
   { name: "Audit Logs", href: "/admin/logs", icon: ClipboardList },
+  { name: "Clients", href: "/client", icon: User },
 ];
-
 // ================= EMPLOYEE =================
 export const employeeSidebar: SidebarItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },

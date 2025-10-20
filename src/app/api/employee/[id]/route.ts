@@ -1,5 +1,5 @@
   // app/api/employee/[id]/route.ts
-  import { NextRequest, NextResponse } from "next/server";
+  import { NextResponse } from "next/server";
   import { connectDB } from "@/lib/mongodb";
   import Lead from "@/models/lead";
 

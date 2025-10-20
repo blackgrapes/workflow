@@ -1,117 +1,221 @@
 "use client";
 
-import { useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
-  UserPlus,
   Users,
-  CheckCircle,
-  Clock,
+  Briefcase,
+  CalendarDays,
+  TrendingUp,
+  Activity,
 } from "lucide-react";
 import {
-  LineChart,
-  Line,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
-  Legend,
+  LineChart,
+  Line,
 } from "recharts";
+
+interface ManagerDashboardData {
+  totalEmployees: number;
+  totalLeads: number;
+  leadsLast7Days: number;
+  dailyLeads?: { date: string; count: number }[];
+}
 
 interface ManagerDashboardProps {
   managerId: string;
   department: string;
 }
 
-// Dummy stats
-const getStatsData = () => [
-  { name: "Total Leads", value: 320, icon: UserPlus, color: "bg-teal-500" },
-  { name: "Total Employees", value: 25, icon: Users, color: "bg-indigo-500" },
-  { name: "Active Employees", value: 20, icon: CheckCircle, color: "bg-green-500" },
-  { name: "Pending Leads", value: 15, icon: Clock, color: "bg-orange-500" },
-];
+export default function ManagerDashboard({
+  managerId,
+  department,
+}: ManagerDashboardProps) {
+  const [data, setData] = useState<ManagerDashboardData>({
+    totalEmployees: 0,
+    totalLeads: 0,
+    leadsLast7Days: 0,
+    dailyLeads: [],
+  });
+  const [loading, setLoading] = useState(false);
 
-// Dummy daily leads data
-const dailyLeadsData = [
-  { day: "Mon", leads: 20 },
-  { day: "Tue", leads: 35 },
-  { day: "Wed", leads: 25 },
-  { day: "Thu", leads: 40 },
-  { day: "Fri", leads: 30 },
-  { day: "Sat", leads: 50 },
-  { day: "Sun", leads: 45 },
-];
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("/api/dashboard/manager", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ managerId, department }),
+        });
 
-export default function ManagerDashboard({ managerId, department }: ManagerDashboardProps) {
-  const [stats] = useState(getStatsData());
+        if (!res.ok) throw new Error("Failed to fetch dashboard data");
+
+        const result: ManagerDashboardData = await res.json();
+        setData(result);
+      } catch (err) {
+        console.error("Dashboard fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [managerId, department]);
+
+  const chartData = useMemo(() => {
+    return (
+      data.dailyLeads?.map((d) => ({
+        name: d.date,
+        Leads: d.count,
+      })) || []
+    );
+  }, [data.dailyLeads]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-[80vh]">
+        <div className="text-lg font-semibold text-gray-600 animate-pulse">
+          Loading Dashboard...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen p-6 md:p-10 bg-gray-50 space-y-8">
-      
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl md:text-4xl font-bold text-teal-700 mb-1">
-          {department} Manager Dashboard
-        </h1>
-        <p className="text-gray-600 text-sm md:text-base">
-          Manager ID: <span className="font-medium">{managerId}</span> | Department: <span className="font-medium">{department}</span>
-        </p>
-      </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center p-6">
+      <h1 className="text-3xl font-bold text-gray-800 mb-8 text-center">
+        Manager Dashboard
+      </h1>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={stat.name}
-              className={`flex flex-col justify-between bg-white shadow-lg rounded-lg p-6 hover:shadow-xl transition duration-300`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-700">{stat.name}</h3>
-                <div className={`${stat.color} rounded-full p-2`}>
-                  <Icon size={22} className="text-white" />
-                </div>
-              </div>
-              <p className="text-3xl font-bold text-gray-900">{stat.value}</p>
-              <p className="text-sm text-gray-500">{stat.name}</p>
-              <a href="#" className="mt-2 text-blue-600 text-sm hover:underline">View Details</a>
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
+        <StatCard
+          title="Total Employees"
+          value={data.totalEmployees}
+          icon={<Users className="w-6 h-6 text-white" />}
+          gradient="from-blue-500 to-blue-400"
+        />
+        <StatCard
+          title="Total Leads"
+          value={data.totalLeads}
+          icon={<Briefcase className="w-6 h-6 text-white" />}
+          gradient="from-purple-500 to-purple-400"
+        />
+        <StatCard
+          title="Last 7 Days Leads"
+          value={data.leadsLast7Days}
+          icon={<CalendarDays className="w-6 h-6 text-white" />}
+          gradient="from-teal-500 to-teal-400"
+        />
       </div>
 
-      {/* Daily Leads Chart */}
-      <div className="bg-white p-6 rounded-lg shadow-lg">
-        <h2 className="text-2xl font-bold mb-4 text-gray-700">Daily Leads Overview</h2>
-        <ResponsiveContainer width="100%" height={350}>
-          <LineChart data={dailyLeadsData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#14B8A6" stopOpacity={0.8} />
-                <stop offset="100%" stopColor="#14B8A6" stopOpacity={0.1} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-            <XAxis dataKey="day" stroke="#4B5563" />
-            <YAxis stroke="#4B5563" />
-            <Tooltip
-              contentStyle={{ backgroundColor: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}
-              itemStyle={{ color: "#14B8A6" }}
-            />
-            <Legend verticalAlign="top" height={36}/>
-            <Line
-              type="monotone"
-              dataKey="leads"
-              stroke="#14B8A6"
-              strokeWidth={3}
-              activeDot={{ r: 6 }}
-              dot={{ r: 4, fill: "#14B8A6" }}
-              fill="url(#lineGradient)"
-            />
-          </LineChart>
-        </ResponsiveContainer>
+      {/* Charts */}
+      <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-8 w-full max-w-6xl">
+        {/* Bar Chart */}
+        <div className="bg-white rounded-2xl p-6 shadow-md hover:shadow-xl transition">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-700">
+              Leads Trend (Last 7 Days)
+            </h2>
+            <TrendingUp className="w-5 h-5 text-teal-600" />
+          </div>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: "8px",
+                    borderColor: "#14b8a6",
+                    fontSize: "0.875rem",
+                  }}
+                />
+                <Bar
+                  dataKey="Leads"
+                  fill="#14b8a6"
+                  radius={[6, 6, 0, 0]}
+                  barSize={26}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-center text-gray-400 py-10">No chart data</p>
+          )}
+        </div>
+
+        {/* Line Chart */}
+        <div className="bg-white rounded-2xl p-6 shadow-md hover:shadow-xl transition">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-700">
+              Leads Performance Overview
+            </h2>
+            <Activity className="w-5 h-5 text-green-600" />
+          </div>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: "8px",
+                    borderColor: "#0d9488",
+                    fontSize: "0.875rem",
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="Leads"
+                  stroke="#0d9488"
+                  strokeWidth={3}
+                  dot={{ r: 5, fill: "#0d9488" }}
+                  activeDot={{ r: 8 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-center text-gray-400 py-10">No chart data</p>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+/* ------------------------------
+   Gradient Stat Card Component
+--------------------------------*/
+interface StatCardProps {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  gradient: string; // Tailwind gradient string
+}
+
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon, gradient }) => {
+  return (
+    <div className="relative bg-white p-6 rounded-2xl shadow-md hover:shadow-xl transition overflow-hidden">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-gray-500 text-sm font-medium">{title}</h3>
+          <p className="text-3xl font-bold mt-1 text-gray-800">{value}</p>
+        </div>
+        <div
+          className={`p-4 rounded-full text-white bg-gradient-to-tr ${gradient} shadow-md`}
+        >
+          {icon}
+        </div>
+      </div>
+      <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent to-transparent"></div>
+    </div>
+  );
+};
