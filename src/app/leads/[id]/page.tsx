@@ -6,13 +6,19 @@ import { useParams, useRouter } from "next/navigation";
 import type { Lead } from "@/types/leads";
 import { getLeadById } from "@/lib/frontendApis/employees/apis";
 import LoadingSkeleton from "@/app/component/loading/loading";
+import CustomerServicePanel from "../component/leadsDetails/CustomerServicePanel";
+import PartOneMetaLogs from "../component/leadsDetails/MetaLogs";
+import SourcingPanel from "../component/leadsDetails/SourcingPanel";
+import ShippingPanel from "../component/leadsDetails/ShippingPanel";
+import SalesPanel from "../component/leadsDetails/SalesPanel";
+import Header from "../component/leadsDetails/detailHeader";
 
 /*
-  Updates requested & applied:
-  - Applied the same translucent + blur header effect to all cards on the page.
-  - Replaced inline SVG icons with simple emoji-based icons (no external deps).
-  - Kept no `any` usage and preserved TypeScript typing.
-  - Returned full file for direct paste into your editor.
+ Parent responsibilities:
+ - fetch lead
+ - keep the shared image viewer state & openViewer function
+ - provide export (CSV & printable PDF) for full lead
+ - control which section is shown (segment control)
 */
 
 type SectionKey = "all" | "customerService" | "sourcing" | "shipping" | "sales";
@@ -20,7 +26,6 @@ type SectionKey = "all" | "customerService" | "sourcing" | "shipping" | "sales";
 function normalizeResponseToLead(resp: unknown): Lead | null {
   if (!resp || typeof resp !== "object") return null;
   const obj = resp as Record<string, unknown>;
-
   if ("success" in obj && "data" in obj && obj.data && typeof obj.data === "object") {
     return obj.data as Lead;
   }
@@ -36,24 +41,31 @@ function normalizeResponseToLead(resp: unknown): Lead | null {
   return null;
 }
 
-/* Emoji-based icons to avoid any external dependency (keeps code simple & practical) */
-const Icon = {
-  Id: () => <span role="img" aria-label="id" className="text-sm">🆔</span>,
-  Phone: () => <span role="img" aria-label="phone" className="text-sm">📞</span>,
-  Location: () => <span role="img" aria-label="location" className="text-sm">📍</span>,
-  Status: () => <span role="img" aria-label="status" className="text-sm">🏷️</span>,
-  Calendar: () => <span role="img" aria-label="calendar" className="text-sm">📅</span>,
-  Attachment: () => <span role="img" aria-label="attachment" className="text-sm">📎</span>,
-  Clock: () => <span role="img" aria-label="clock" className="text-sm">🕒</span>,
-  Back: () => <span role="img" aria-label="back" className="text-sm">◀️</span>,
-  ChevronDown: () => <span role="img" aria-label="chevron-down" className="text-sm">▼</span>,
-  External: () => <span role="img" aria-label="external" className="text-sm">↗️</span>,
-  Person: () => <span role="img" aria-label="person" className="text-base">👤</span>,
-  Factory: () => <span role="img" aria-label="factory" className="text-base">🏭</span>,
-  Ship: () => <span role="img" aria-label="ship" className="text-base">🚢</span>,
-  Briefcase: () => <span role="img" aria-label="briefcase" className="text-base">💼</span>,
-  Image: () => <span role="img" aria-label="image" className="text-2xl">🖼️</span>
-};
+/* export helpers (CSV & printable) */
+function objectToCsv(rows: string[][]): string {
+  return rows
+    .map((r) =>
+      r
+        .map((c) => {
+          const escaped = String(c ?? "").replace(/"/g, '""');
+          return `"${escaped}"`;
+        })
+        .join(",")
+    )
+    .join("\r\n");
+}
+
+function downloadFile(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export default function LeadDetailPage(): ReactNode {
   const params = useParams() as { id?: string } | undefined;
@@ -71,6 +83,11 @@ export default function LeadDetailPage(): ReactNode {
     shipping: true,
     sales: true
   });
+
+  // Image viewer (shared) state
+  const [viewerOpen, setViewerOpen] = useState<boolean>(false);
+  const [viewerImages, setViewerImages] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState<number>(0);
 
   useEffect(() => {
     if (!id) {
@@ -103,24 +120,287 @@ export default function LeadDetailPage(): ReactNode {
       }
     };
     fetchLead();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [id]);
 
-  const toggle = (key: SectionKey) => {
-    setExpanded((s) => ({ ...s, [key]: !s[key] }));
+  // keyboard navigation for viewer
+  useEffect(() => {
+    if (!viewerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setViewerOpen(false);
+      else if (e.key === "ArrowLeft") setViewerIndex((i) => (viewerImages.length ? (i - 1 + viewerImages.length) % viewerImages.length : 0));
+      else if (e.key === "ArrowRight") setViewerIndex((i) => (viewerImages.length ? (i + 1) % viewerImages.length : 0));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewerOpen, viewerImages.length]);
+
+  const openViewer = (images: string[], index = 0) => {
+    if (!images || images.length === 0) return;
+    setViewerImages(images);
+    setViewerIndex(Math.max(0, Math.min(index, images.length - 1)));
+    setViewerOpen(true);
   };
 
-  const sectionColor = (_key: SectionKey) => {
-    // Return the translucent + blur base (header style) — individual wrappers add rounded/shadow/padding as before.
-    return "bg-white/40 backdrop-blur-md border border-gray-100";
-  };
+  const closeViewer = () => setViewerOpen(false);
+  const prevImage = () => setViewerIndex((i) => (viewerImages.length ? (i - 1 + viewerImages.length) % viewerImages.length : 0));
+  const nextImage = () => setViewerIndex((i) => (viewerImages.length ? (i + 1) % viewerImages.length : 0));
+
+  const toggle = (key: SectionKey) => setExpanded((s) => ({ ...s, [key]: !s[key] }));
 
   const showSection = useMemo(() => (section: SectionKey) => {
     if (selectedSection === "all") return true;
     return selectedSection === section;
   }, [selectedSection]);
+
+  /* Export: CSV - flattened (use Marka from customerService only) */
+  const exportAsCsv = () => {
+    if (!lead) return;
+    const rows: string[][] = [];
+
+    const marka = lead.customerService?.marka ?? "";
+
+    rows.push(["Lead ID", lead.leadId ?? ""]);
+    rows.push(["Status", lead.currentStatus ?? ""]);
+    rows.push(["Assigned Employee", lead.currentAssignedEmployee?.employeeName ?? ""]);
+    // Marka from customerService
+    rows.push(["Marka", marka]);
+    rows.push([]);
+    rows.push(["Customer Service"]);
+    rows.push(["Customer Name", lead.customerService?.customerName ?? ""]);
+    rows.push(["Contact", lead.customerService?.contactNumber ?? ""]);
+    rows.push(["Address", lead.customerService?.address ?? ""]);
+    rows.push(["City", `${lead.customerService?.city ?? ""}${lead.customerService?.state ? `, ${lead.customerService.state}` : ""}`]);
+    rows.push(["Marka (Customer Service)", marka]);
+    rows.push([]);
+
+    // products
+    rows.push(["Products (one row per product image)"]);
+    rows.push(["Product Name", "Quantity", "Size", "Target Price", "Image URL"]);
+    if (lead.customerService?.products && lead.customerService.products.length > 0) {
+      lead.customerService.products.forEach((p) => {
+        const files = p.uploadFiles ?? [];
+        if (files.length === 0) {
+          rows.push([p.productName ?? "", String(p.quantity ?? ""), p.size ?? "", String(p.targetPrice ?? ""), ""]);
+        } else {
+          files.forEach((f) => {
+            rows.push([p.productName ?? "", String(p.quantity ?? ""), p.size ?? "", String(p.targetPrice ?? ""), f]);
+          });
+        }
+      });
+    }
+    rows.push([]);
+
+    // sourcing
+    rows.push(["Sourcing"]);
+    rows.push(["Product", lead.sourcing?.productName ?? ""]);
+    rows.push(["Company", lead.sourcing?.companyName ?? ""]);
+    rows.push(["Supplier", lead.sourcing?.supplierName ?? ""]);
+    rows.push([]);
+
+    // shipping
+    rows.push(["Shipping"]);
+    rows.push(["Item Name", lead.shipping?.itemName ?? ""]);
+    rows.push(["Totals", `CTN:${lead.shipping?.totalCTN ?? 0} KG:${lead.shipping?.totalKG ?? 0} PCS:${lead.shipping?.totalPCS ?? 0}`]);
+    rows.push([]);
+
+    // sales
+    rows.push(["Sales"]);
+    rows.push(["Tracking Number", lead.sales?.trackingNumber ?? ""]);
+    rows.push(["Warehouse Receipt", lead.sales?.warehouseReceipt ?? ""]);
+    rows.push([]);
+
+    // logs
+    rows.push(["Logs"]);
+    rows.push(["Employee", "Timestamp", "Comment"]);
+    if (lead.logs && lead.logs.length > 0) {
+      lead.logs.forEach((l) => {
+        rows.push([l.employeeName ?? "", l.timestamp ? new Date(l.timestamp).toLocaleString() : "", l.comment ?? ""]);
+      });
+    }
+
+    const csv = objectToCsv(rows);
+    // add BOM so Excel reliably recognizes UTF-8
+    const csvWithBom = "\uFEFF" + csv;
+    downloadFile(`${lead.leadId ?? "lead"}.csv`, csvWithBom, "text/csv;charset=utf-8;");
+  };
+
+  /* Export: printable (user can Save as PDF)
+     Improved strategy:
+     - Build HTML string that includes a small script which waits for images to load
+       before calling window.print(). That script will also post back a message
+       on completion in case we need to detect it.
+     - We open a new window, write the HTML, then focus & rely on the injected script
+       to run print once images/resources have loaded.
+     - If popups are blocked or print fails, a fallback blob download of the HTML is provided.
+  */
+  const exportAsPdf = () => {
+    if (!lead) return;
+
+    const marka = lead.customerService?.marka ?? "";
+
+    // Build HTML content. The embedded script waits for images to finish loading before printing.
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${lead.leadId ?? "Lead"}</title>
+          <meta name="viewport" content="width=device-width,initial-scale=1" />
+          <style>
+            body{font-family: Arial, sans-serif; padding:20px; color:#111; line-height:1.4}
+            h1{font-size:18px; margin:0 0 12px 0}
+            h3{margin:10px 0 6px 0}
+            .section{margin-bottom:12px; border-bottom:1px solid #eee; padding-bottom:8px}
+            .k{font-weight:600; width:200px; display:inline-block}
+            .product{margin-bottom:8px}
+            img{max-width:200px; max-height:150px; margin:6px; display:inline-block}
+            table{border-collapse:collapse; width:100%; margin-top:8px}
+            th,td{border:1px solid #ddd; padding:6px; text-align:left; font-size:13px}
+            @media print {
+              img{max-width:200px; max-height:150px}
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Lead ${lead.leadId ?? ""}</h1>
+
+          <div class="section">
+            <div><span class="k">Status:</span>${lead.currentStatus ?? ""}</div>
+            <div><span class="k">Assigned:</span>${lead.currentAssignedEmployee?.employeeName ?? ""}</div>
+          </div>
+
+          <div class="section">
+            <h3>Customer Service</h3>
+            <div><span class="k">Customer:</span>${lead.customerService?.customerName ?? ""}</div>
+            <div><span class="k">Contact:</span>${lead.customerService?.contactNumber ?? ""}</div>
+            <div><span class="k">Address:</span>${lead.customerService?.address ?? ""}</div>
+            <div><span class="k">City:</span>${lead.customerService?.city ?? ""}</div>
+            <div><span class="k">Marka:</span>${marka}</div>
+
+            ${(lead.customerService?.products ?? []).map((p) => `
+              <div class="product">
+                <div><strong>${p.productName ?? ""}</strong></div>
+                <div>Qty: ${p.quantity ?? ""} Size: ${p.size ?? ""} Target: ${p.targetPrice ?? ""}</div>
+                <div>
+                  ${(p.uploadFiles ?? []).map((u) => `<img src="${u}" />`).join("")}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+
+          <div class="section">
+            <h3>Sourcing</h3>
+            <div><span class="k">Product:</span>${lead.sourcing?.productName ?? ""}</div>
+            <div><span class="k">Company:</span>${lead.sourcing?.companyName ?? ""}</div>
+          </div>
+
+          <div class="section">
+            <h3>Shipping</h3>
+            <div><span class="k">Item:</span>${lead.shipping?.itemName ?? ""}</div>
+            <div><span class="k">Totals:</span>CTN:${lead.shipping?.totalCTN ?? 0} KG:${lead.shipping?.totalKG ?? 0} PCS:${lead.shipping?.totalPCS ?? 0}</div>
+            <div>
+              ${lead.shipping?.uploadInvoice ? `<div><strong>Invoice:</strong> <a href="${lead.shipping.uploadInvoice}">${lead.shipping.uploadInvoice}</a></div>` : ""}
+              ${lead.shipping?.uploadPackingList ? `<div><strong>Packing List:</strong> <a href="${lead.shipping.uploadPackingList}">${lead.shipping.uploadPackingList}</a></div>` : ""}
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Sales</h3>
+            <div><span class="k">Tracking:</span>${lead.sales?.trackingNumber ?? ""}</div>
+            <div><span class="k">Warehouse Receipt:</span>${lead.sales?.warehouseReceipt ?? ""}</div>
+          </div>
+
+          <div class="section">
+            <h3>Logs</h3>
+            ${(lead.logs ?? []).length > 0 ? `
+              <table>
+                <thead><tr><th>Employee</th><th>Timestamp</th><th>Comment</th></tr></thead>
+                <tbody>
+                  ${(lead.logs ?? []).map((l) => `<tr><td>${l.employeeName ?? ""}</td><td>${l.timestamp ? new Date(l.timestamp).toLocaleString() : ""}</td><td>${(l.comment ?? "").replace(/</g,'&lt;')}</td></tr>`).join("")}
+                </tbody>
+              </table>
+            ` : `<div>No logs available</div>`}
+          </div>
+
+          <script>
+            (function() {
+              // Wait for all images to load (or error) before triggering print
+              function whenImagesLoaded(timeoutMs) {
+                return new Promise(function(resolve) {
+                  var imgs = Array.from(document.images || []);
+                  if (imgs.length === 0) { resolve(); return; }
+                  var completed = 0;
+                  var done = function() {
+                    completed++;
+                    if (completed >= imgs.length) resolve();
+                  };
+                  imgs.forEach(function(img){
+                    if (img.complete) { done(); }
+                    else {
+                      img.addEventListener('load', done);
+                      img.addEventListener('error', done);
+                    }
+                  });
+                  // safety timeout in case some images hang
+                  setTimeout(resolve, timeoutMs || 3000);
+                });
+              }
+
+              function tryPrint() {
+                try {
+                  window.focus();
+                  window.print();
+                } catch (e) {
+                  // ignore printing errors
+                }
+              }
+
+              // Wait for DOMContentLoaded then images, then print
+              if (document.readyState === 'complete') {
+                whenImagesLoaded(4000).then(tryPrint);
+              } else {
+                window.addEventListener('load', function() {
+                  whenImagesLoaded(4000).then(tryPrint);
+                });
+              }
+            })();
+          </script>
+        </body>
+      </html>`;
+
+    // Try to open a new window and write HTML into it.
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+      // Popup blocked -> fallback: create blob and trigger download of HTML so user can open and print manually
+      const blob = new Blob([html], { type: "text/html" });
+      const blobUrl = URL.createObjectURL(blob);
+      downloadFile(`${lead.leadId ?? "lead"}.html`, html, "text/html");
+      // also open blob in new tab if allowed (may still be blocked)
+      try {
+        window.open(blobUrl, "_blank");
+      } catch (e) {
+        // ignore
+      }
+      // revoke after some time
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+      return;
+    }
+
+    try {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      // focus and rely on embedded script to call print after images loaded
+      printWindow.focus();
+    } catch (err) {
+      // If writing fails for any reason, fallback to downloading html
+      const blob = new Blob([html], { type: "text/html" });
+      const blobUrl = URL.createObjectURL(blob);
+      downloadFile(`${lead.leadId ?? "lead"}.html`, html, "text/html");
+      try { window.open(blobUrl, "_blank"); } catch (e) { /* ignore */ }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    }
+  };
 
   if (loading) return <LoadingSkeleton />;
 
@@ -129,13 +409,7 @@ export default function LeadDetailPage(): ReactNode {
       <div className="p-6">
         <div className="text-red-600">Error: {error}</div>
         <div className="mt-4 flex gap-2">
-          <button
-            className="inline-flex items-center gap-2 px-3 py-2 border rounded bg-white hover:bg-gray-50"
-            onClick={() => router.back()}
-            type="button"
-          >
-            <Icon.Back /> <span>Back</span>
-          </button>
+          <button className="inline-flex items-center gap-2 px-3 py-2 border rounded bg-white hover:bg-gray-50" onClick={() => router.back()} type="button">Back</button>
         </div>
       </div>
     );
@@ -145,13 +419,7 @@ export default function LeadDetailPage(): ReactNode {
     return (
       <div className="p-6">
         <div className="text-gray-600">Lead not found.</div>
-        <button
-          className="mt-4 px-3 py-2 border rounded"
-          onClick={() => router.back()}
-          type="button"
-        >
-          Back
-        </button>
+        <button className="mt-4 px-3 py-2 border rounded" onClick={() => router.back()} type="button">Back</button>
       </div>
     );
   }
@@ -159,351 +427,96 @@ export default function LeadDetailPage(): ReactNode {
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-6">
-        {/* Top header card — translucent + blur so the mirror-like effect is visible */}
         <div className="sticky top-4 z-20">
-          <div className="bg-white/40 backdrop-blur-md border border-gray-100 rounded-2xl p-4 md:p-5 shadow-sm">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-md px-2 py-1 bg-white border border-gray-100 text-xs font-medium inline-flex items-center gap-2">
-                    <span className="text-sm"><Icon.Id /></span>
-                    <span className="font-mono text-sm">{lead.leadId}</span>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-500 flex items-center gap-3">
-                    <span className="inline-flex items-center gap-2"><Icon.Phone /> <span>{lead.customerService?.contactNumber ?? "—"}</span></span>
-                    <span className="inline-flex items-center gap-2">•</span>
-                    <span className="inline-flex items-center gap-2"><Icon.Location /> <span>{lead.customerService?.city ?? "—"}{lead.customerService?.state ? `, ${lead.customerService.state}` : ""}</span></span>
-                  </div>
-                  <h2 className="text-xl md:text-2xl font-semibold mt-1">{lead.customerService?.customerName ?? "—"}</h2>
-                  <div className="mt-1 text-sm text-gray-600 inline-flex items-center gap-6">
-                    <span className="inline-flex items-center gap-2"><Icon.Status /> <span className="capitalize">{lead.currentStatus ?? "—"}</span></span>
-                    <span className="inline-flex items-center gap-2">Assigned: <strong>{lead.currentAssignedEmployee?.employeeName ?? "—"}</strong></span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {/* segmented control */}
-                <div className="hidden sm:flex items-center gap-1 bg-transparent p-1 rounded-md border border-transparent">
-                  {(["all","customerService","sourcing","shipping","sales"] as SectionKey[]).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSelectedSection(s)}
-                      className={`px-3 py-1 text-sm rounded-md transition ${selectedSection === s ? "bg-white shadow-sm font-medium border border-gray-100" : "text-gray-600 hover:bg-gray-100"}`}
-                    >
-                      {s === "all" ? "All" : s === "customerService" ? "Customer" : s === "sourcing" ? "Sourcing" : s === "shipping" ? "Shipping" : "Sales"}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button onClick={() => router.back()} className="inline-flex items-center gap-2 px-3 py-2 rounded-md border hover:bg-gray-50 bg-white">
-                    <Icon.Back /> <span className="hidden sm:inline">Back</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* mobile select */}
-            <div className="mt-3 sm:hidden">
-              <select
-                className="w-full rounded-md border px-3 py-2 bg-white text-sm"
-                value={selectedSection}
-                onChange={(e) => setSelectedSection(e.target.value as SectionKey)}
-              >
-                <option value="all">All</option>
-                <option value="customerService">Customer Service</option>
-                <option value="sourcing">Sourcing</option>
-                <option value="shipping">Shipping</option>
-                <option value="sales">Sales</option>
-              </select>
-            </div>
-          </div>
+          <Header
+            lead={lead}
+            selectedSection={selectedSection}
+            setSelectedSection={setSelectedSection}
+            onBack={() => router.back()}
+            onExportCsv={exportAsCsv}
+            onExportPdf={exportAsPdf}
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
-          {/* Sidebar (meta + uploads + logs) */}
+          {/* Part 1: Meta + Logs */}
           <aside className="md:col-span-1 space-y-4">
-            <div className="bg-white/40 backdrop-blur-md border border-gray-100 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-500"><Icon.Calendar /></span>
-                  <h3 className="text-sm font-semibold">Meta</h3>
-                </div>
-              </div>
-              <div className="mt-3 text-sm text-gray-600 space-y-2">
-                <div className="flex items-center gap-2"><span className="text-gray-400"><Icon.Calendar /></span> Created: <span className="ml-auto font-medium">{lead.createdAt ? new Date(lead.createdAt).toLocaleString() : "—"}</span></div>
-                <div className="flex items-center gap-2"><span className="text-gray-400"><Icon.Clock /></span> Updated: <span className="ml-auto font-medium">{lead.updatedAt ? new Date(lead.updatedAt).toLocaleString() : "—"}</span></div>
-                <div className="flex items-center gap-2"><span className="text-gray-400"><Icon.Id /></span> Marka: <span className="ml-auto font-medium">{lead.customerService?.marka ?? lead.shipping?.marka ?? "—"}</span></div>
-              </div>
-            </div>
-
-            <div className="bg-white/40 backdrop-blur-md border border-gray-100 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-500"><Icon.Attachment /></span>
-                <h3 className="text-sm font-semibold">Uploaded</h3>
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {(lead.uploadFiles && lead.uploadFiles.length > 0) ? (
-                  lead.uploadFiles.map((u, i) => (
-                    <a key={String(i)} href={u} target="_blank" rel="noreferrer" className="rounded overflow-hidden border hover:scale-105 transition-transform block">
-                      <img src={u} alt={`upload-${i}`} className="w-full h-20 object-cover" />
-                    </a>
-                  ))
-                ) : (
-                  <div className="text-sm text-gray-400 col-span-3">No uploads</div>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white/40 backdrop-blur-md border border-gray-100 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-500"><Icon.Clock /></span>
-                <h3 className="text-sm font-semibold">Logs</h3>
-              </div>
-
-              <div className="mt-3 max-h-48 overflow-auto text-sm text-gray-700 space-y-3">
-                {lead.logs && lead.logs.length > 0 ? (
-                  <div className="relative pl-4">
-                    <div className="absolute left-1 top-0 bottom-0 w-px bg-gray-200" />
-                    <div className="space-y-4">
-                      {lead.logs.map((l, idx) => (
-                        <div key={String(idx)} className="flex items-start gap-3">
-                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs">{String(idx + 1)}</div>
-                          <div>
-                            <div className="text-xs text-gray-500">{l.employeeName} • <span className="text-gray-400">{l.timestamp ? new Date(l.timestamp).toLocaleString() : ""}</span></div>
-                            <div className="text-sm text-gray-700">{l.comment}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-400">No logs available</div>
-                )}
-              </div>
-            </div>
+            <PartOneMetaLogs
+              lead={lead}
+              openViewer={openViewer}
+            />
           </aside>
 
-          {/* Main content - spans 3 columns */}
-          <div className="md:col-span-3 space-y-6">
-
+          {/* Parts 2-5 in main column */}
+          <main className="md:col-span-3 space-y-6">
             {/* Customer Service */}
             {lead.customerService && showSection("customerService") && (
-              <div className={`${sectionColor("customerService")} rounded-2xl overflow-hidden shadow-sm`}>
-                <div className="flex items-center justify-between px-4 py-3 border-b">
-                  <div className="flex items-center gap-3">
-                    <div className="px-3 py-2 rounded-md bg-white border border-gray-100 text-gray-700 inline-flex items-center"><Icon.Person /></div>
-                    <div>
-                      <div className="text-sm font-semibold">Customer Service</div>
-                      <div className="text-xs text-gray-500">Customer & product details</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => toggle("customerService")} className="inline-flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-50">
-                      <span className="text-sm">{expanded.customerService ? "Collapse" : "Expand"}</span>
-                      <span className={`transform transition-transform ${expanded.customerService ? "rotate-180" : "rotate-0"}`}><Icon.ChevronDown /></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-4 transition-all ${expanded.customerService ? "max-h-screen opacity-100" : "max-h-0 opacity-0 p-0"}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Customer <span className="ml-auto font-medium">{lead.customerService.customerName ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Contact <span className="ml-auto font-medium">{lead.customerService.contactNumber ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Address <span className="ml-auto text-sm">{lead.customerService.address ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">City <span className="ml-auto font-medium">{lead.customerService.city ?? "—"}{lead.customerService.state ? `, ${lead.customerService.state}` : ""}</span></div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Employee ID <span className="ml-auto font-medium">{String(lead.customerService.employeeId ?? "—")}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Manager ID <span className="ml-auto font-medium">{String(lead.customerService.managerId ?? "—")}</span></div>
-
-                      <div>
-                        <div className="text-sm text-gray-500">Products</div>
-                        {lead.customerService.products && lead.customerService.products.length > 0 ? (
-                          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {lead.customerService.products.map((p, idx) => (
-                              <div key={String(idx)} className="flex gap-3 items-center border rounded-md p-3 bg-white">
-                                <div className="w-16 h-12 rounded overflow-hidden border flex-shrink-0 flex items-center justify-center bg-gray-50">
-                                  {p.uploadFiles && p.uploadFiles[0] ? (
-                                    <img src={p.uploadFiles[0]} alt={p.productName ?? `product-${idx}`} className="w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="text-gray-300"><Icon.Image /></div>
-                                  )}
-                                </div>
-                                <div className="flex-1">
-                                  <div className="font-medium">{p.productName}</div>
-                                  <div className="text-xs text-gray-500">Qty: {p.quantity ?? "—"} • Size: {p.size ?? "—"}</div>
-                                  <div className="mt-2 text-xs text-gray-600">Target: {p.targetPrice ?? "—"}</div>
-                                </div>
-                                <div>
-                                  <a href={p.uploadFiles && p.uploadFiles[0] ? p.uploadFiles[0] : "#"} target="_blank" rel="noreferrer" className="text-xs inline-flex items-center gap-1 px-2 py-1 border rounded hover:bg-gray-50">
-                                    View <Icon.External />
-                                  </a>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-gray-400 mt-2">No products added</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <CustomerServicePanel
+                lead={lead}
+                expanded={expanded.customerService}
+                onToggle={() => toggle("customerService")}
+                openViewer={openViewer}
+              />
             )}
 
             {/* Sourcing */}
             {lead.sourcing && showSection("sourcing") && (
-              <div className={`${sectionColor("sourcing")} rounded-2xl overflow-hidden shadow-sm`}>
-                <div className="flex items-center justify-between px-4 py-3 border-b">
-                  <div className="flex items-center gap-3">
-                    <div className="px-3 py-2 rounded-md bg-white border border-gray-100 text-gray-700 inline-flex items-center"><Icon.Factory /></div>
-                    <div>
-                      <div className="text-sm font-semibold">Sourcing</div>
-                      <div className="text-xs text-gray-500">Supplier & catalogue</div>
-                    </div>
-                  </div>
-                  <div>
-                    <button onClick={() => toggle("sourcing")} className="inline-flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-50">
-                      <span className="text-sm">{expanded.sourcing ? "Collapse" : "Expand"}</span>
-                      <span className={`transform transition-transform ${expanded.sourcing ? "rotate-180" : "rotate-0"}`}><Icon.ChevronDown /></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-4 transition-all ${expanded.sourcing ? "max-h-screen opacity-100" : "max-h-0 opacity-0 p-0"}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Product <span className="ml-auto font-medium">{lead.sourcing.productName || "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Company <span className="ml-auto font-medium">{lead.sourcing.companyName ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Company Address <span className="ml-auto text-sm">{lead.sourcing.companyAddress ?? "—"}</span></div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Supplier <span className="ml-auto font-medium">{lead.sourcing.supplierName ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Supplier Contact <span className="ml-auto font-medium">{lead.sourcing.supplierContactNumber ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Unit price <span className="ml-auto font-medium">{lead.sourcing.productUnitPrice ?? "—"}</span></div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <div className="text-sm text-gray-500">Product detail</div>
-                    <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap">{lead.sourcing.productDetail ?? "—"}</div>
-                  </div>
-
-                  <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                    {lead.sourcing.productCatalogue ? (
-                      <a href={lead.sourcing.productCatalogue} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-md border inline-flex items-center gap-2 hover:bg-gray-50">Open catalogue</a>
-                    ) : (
-                      <div className="text-sm text-gray-400">No catalogue uploaded</div>
-                    )}
-
-                    <div className="mt-2 sm:mt-0">
-                      {lead.sourcing.uploadDocuments && lead.sourcing.uploadDocuments.length > 0 ? (
-                        <div className="flex gap-2 flex-wrap">
-                          {lead.sourcing.uploadDocuments.map((d, i) => (
-                            <a key={String(i)} href={d} target="_blank" rel="noreferrer" className="px-3 py-2 border rounded text-sm hover:bg-gray-50">Document {i + 1}</a>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-400">No documents</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SourcingPanel
+                lead={lead}
+                expanded={expanded.sourcing}
+                onToggle={() => toggle("sourcing")}
+                openViewer={openViewer}
+              />
             )}
 
             {/* Shipping */}
             {lead.shipping && showSection("shipping") && (
-              <div className={`${sectionColor("shipping")} rounded-2xl overflow-hidden shadow-sm`}>
-                <div className="flex items-center justify-between px-4 py-3 border-b">
-                  <div className="flex items-center gap-3">
-                    <div className="px-3 py-2 rounded-md bg-white border border-gray-100 text-gray-700 inline-flex items-center"><Icon.Ship /></div>
-                    <div>
-                      <div className="text-sm font-semibold">Shipping</div>
-                      <div className="text-xs text-gray-500">Logistics & docs</div>
-                    </div>
-                  </div>
-                  <div>
-                    <button onClick={() => toggle("shipping")} className="inline-flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-50">
-                      <span className="text-sm">{expanded.shipping ? "Collapse" : "Expand"}</span>
-                      <span className={`transform transition-transform ${expanded.shipping ? "rotate-180" : "rotate-0"}`}><Icon.ChevronDown /></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-4 transition-all ${expanded.shipping ? "max-h-screen opacity-100" : "max-h-0 opacity-0 p-0"}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">Item <span className="ml-auto font-medium">{lead.shipping.itemName ?? "—"}</span></div>
-                      <div className="text-sm text-gray-500">Totals</div>
-                      <div className="text-sm text-gray-700">CTN: {lead.shipping.totalCTN ?? 0} • KG: {lead.shipping.totalKG ?? 0} • PCS: {lead.shipping.totalPCS ?? 0}</div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="text-sm text-gray-500 flex items-center gap-2">HSN / Mode <span className="ml-auto font-medium">{lead.shipping.hsnCode ?? "—"} • {lead.shipping.shipmentMode ?? "—"}</span></div>
-
-                      <div className="text-sm text-gray-500">Documents</div>
-                      <div className="flex gap-2">
-                        {lead.shipping.uploadInvoice ? (<a href={lead.shipping.uploadInvoice} target="_blank" rel="noreferrer" className="px-3 py-2 border rounded">Invoice</a>) : null}
-                        {lead.shipping.uploadPackingList ? (<a href={lead.shipping.uploadPackingList} target="_blank" rel="noreferrer" className="px-3 py-2 border rounded">Packing List</a>) : null}
-                        {!lead.shipping.uploadInvoice && !lead.shipping.uploadPackingList && <div className="text-sm text-gray-400">No docs</div>}
-                      </div>
-
-                      <div className="text-sm text-gray-500">Freight Rate <span className="ml-auto font-medium">{lead.shipping.freightRate ?? "—"}</span></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ShippingPanel
+                lead={lead}
+                expanded={expanded.shipping}
+                onToggle={() => toggle("shipping")}
+                openViewer={openViewer}
+              />
             )}
 
             {/* Sales */}
             {lead.sales && showSection("sales") && (
-              <div className={`${sectionColor("sales")} rounded-2xl overflow-hidden shadow-sm`}>
-                <div className="flex items-center justify-between px-4 py-3 border-b">
-                  <div className="flex items-center gap-3">
-                    <div className="px-3 py-2 rounded-md bg-white border border-gray-100 text-gray-700 inline-flex items-center"><Icon.Briefcase /></div>
-                    <div>
-                      <div className="text-sm font-semibold">Sales</div>
-                      <div className="text-xs text-gray-500">Order & tracking details</div>
-                    </div>
-                  </div>
-                  <div>
-                    <button onClick={() => toggle("sales")} className="inline-flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-50">
-                      <span className="text-sm">{expanded.sales ? "Collapse" : "Expand"}</span>
-                      <span className={`transform transition-transform ${expanded.sales ? "rotate-180" : "rotate-0"}`}><Icon.ChevronDown /></span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`p-4 transition-all ${expanded.sales ? "max-h-screen opacity-100" : "max-h-0 opacity-0 p-0"}`}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <div className="text-sm text-gray-500">Tracking Number</div>
-                      <div className="font-medium">{lead.sales.trackingNumber ?? "—"}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Warehouse Receipt</div>
-                      <div className="font-medium">{lead.sales.warehouseReceipt ?? "—"}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <SalesPanel
+                lead={lead}
+                expanded={expanded.sales}
+                onToggle={() => toggle("sales")}
+              />
             )}
-
-          </div>
+          </main>
         </div>
       </div>
+
+      {/* Shared image viewer modal */}
+      {viewerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
+          <div className="relative max-w-4xl w-full max-h-[90vh]">
+            <button onClick={closeViewer} className="absolute top-2 right-2 z-60 px-3 py-2 bg-white rounded shadow" aria-label="Close viewer" type="button">Close</button>
+            <button onClick={prevImage} className="absolute left-2 top-1/2 -translate-y-1/2 z-60 px-3 py-2 bg-white rounded shadow hidden md:inline-flex" aria-label="Previous image" type="button">◀</button>
+            <button onClick={nextImage} className="absolute right-2 top-1/2 -translate-y-1/2 z-60 px-3 py-2 bg-white rounded shadow hidden md:inline-flex" aria-label="Next image" type="button">▶</button>
+
+            <div className="w-full h-full flex items-center justify-center">
+              <img src={viewerImages[viewerIndex]} alt={`image-${viewerIndex}`} className="max-w-full max-h-[80vh] object-contain rounded" />
+            </div>
+
+            <div className="mt-2 text-center text-sm text-white/90">
+              {viewerIndex + 1} / {viewerImages.length}
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2 overflow-x-auto">
+              {viewerImages.map((img, idx) => (
+                <button key={String(idx)} onClick={() => setViewerIndex(idx)} type="button" className={`w-12 h-12 rounded overflow-hidden border ${idx === viewerIndex ? "ring-2 ring-white" : ""}`}>
+                  <img src={img} alt={`thumb-${idx}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

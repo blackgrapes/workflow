@@ -17,6 +17,7 @@ interface ProductInput {
   targetPrice?: number | string;
   price?: number | string;
   uploadFiles?: unknown[];
+  remark?: string;
 }
 
 interface EmployeePayload {
@@ -36,28 +37,31 @@ interface CustomerInfo {
   state?: string;
   companyName?: string;
   companyAddress?: string;
+  remark?: string;
+  [key: string]: unknown;
 }
 
 interface ShippingInfo {
   itemName?: string;
-  totalCTN?: number | string;
-  totalCBM?: number | string;
-  totalKG?: number | string;
-  totalValue?: number | string;
-  totalPCS?: number | string;
+  totalCTN?: number;
+  totalCBM?: number;
+  totalKG?: number;
+  totalValue?: number;
+  totalPCS?: number;
   hsnCode?: string;
   shipmentMode?: string;
   uploadInvoice?: string;
   uploadPackingList?: string;
-  freightRate?: number | string;
+  freightRate?: number;
   marka?: string;
+  remark?: string;
 }
 
 interface CreateLeadBody {
   type: string;
   customerInfo?: CustomerInfo;
   products?: ProductInput[];
-  shippingInfo?: ShippingInfo;
+  shippingInfo?: Record<string, unknown>;
   employee: EmployeePayload;
 }
 
@@ -66,7 +70,11 @@ interface CreateLeadBody {
  */
 const safeString = (v: unknown): string => {
   if (v === null || v === undefined) return "";
-  return String(v);
+  try {
+    return String(v).trim();
+  } catch {
+    return "";
+  }
 };
 
 const safeNumber = (v: unknown): number => {
@@ -84,37 +92,61 @@ const toObjectId = (id: unknown): Types.ObjectId | null => {
 };
 
 function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return s.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+}
+
+/**
+ * Normalize keys by lowercasing and stripping non-alphanumeric characters.
+ */
+const normalizeKey = (s: string): string => s.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function mapShippingInfo(raw: Record<string, unknown> | undefined): ShippingInfo {
+  const out: ShippingInfo = {};
+  if (!raw || typeof raw !== "object") return out;
+
+  const normalized = new Map<string, unknown>();
+  for (const [k, v] of Object.entries(raw)) {
+    normalized.set(normalizeKey(k), v);
+  }
+
+  const pickRaw = (variants: string[]): unknown | undefined => {
+    for (const v of variants) {
+      const key = normalizeKey(v);
+      if (normalized.has(key)) return normalized.get(key);
+    }
+    return undefined;
+  };
+
+  out.itemName = safeString(pickRaw(["itemName", "item", "item name", "Item Name"]));
+  out.hsnCode = safeString(pickRaw(["hsn", "hsnCode", "hsn code", "hsn_code"]));
+  out.shipmentMode = safeString(pickRaw(["shipmentMode", "shipment mode", "mode", "shipment_mode"]));
+  out.uploadInvoice = safeString(pickRaw(["uploadInvoice", "upload invoice", "invoice", "upload_invoice"]));
+  out.uploadPackingList = safeString(pickRaw(["uploadPackingList", "upload packing list", "packing", "packing_list"]));
+  out.marka = safeString(pickRaw(["marka", "mark", "brand", "shippingmark"]));
+  out.remark = safeString(pickRaw(["remark", "shippingRemark", "shipping remark", "note", "notes"]));
+
+  out.totalCTN = safeNumber(pickRaw(["totalCTN", "totalctn", "total ctn", "ctn", "total_ctn"]));
+  out.totalCBM = safeNumber(pickRaw(["totalCBM", "totalcbm", "total cbm", "cbm", "total_cbm"]));
+  out.totalKG = safeNumber(pickRaw(["totalKG", "totalkg", "total kg", "kg", "total_kg"]));
+  out.totalValue = safeNumber(pickRaw(["totalValue", "totalvalue", "total value", "value", "total_value"]));
+  out.totalPCS = safeNumber(pickRaw(["totalPCS", "totalpcs", "total pcs", "pcs", "total_pcs"]));
+  out.freightRate = safeNumber(pickRaw(["freightRate", "freightrate", "freight rate", "freight_rate"]));
+
+  return out;
 }
 
 /**
  * Recursively convert ObjectId / Date -> string for JSON-safe response
- * Protects against circular references using WeakSet.
  */
 function serialize(obj: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
-  // primitives / null / undefined
   if (obj === null || obj === undefined) return obj;
   const t = typeof obj;
   if (t === "string" || t === "number" || t === "boolean") return obj;
+  if (Array.isArray(obj)) return obj.map((x) => serialize(x, seen));
+  if (obj instanceof Date) return obj.toISOString();
+  if (obj instanceof Types.ObjectId) return obj.toString();
 
-  // arrays
-  if (Array.isArray(obj)) {
-    return obj.map((x) => serialize(x, seen));
-  }
-
-  // dates
-  if (obj instanceof Date) {
-    return obj.toISOString();
-  }
-
-  // Mongoose ObjectId (instanceof check)
-  if (obj instanceof Types.ObjectId) {
-    return obj.toString();
-  }
-
-  // duck-typed ObjectId (lean objects or serialized forms)
   if (t === "object" && obj !== null) {
-    // use a typed view to safely access properties without 'in' operator
     const asRecord = obj as Record<string, unknown>;
     const bsontype = asRecord["_bsontype"];
     if (typeof bsontype === "string" && bsontype === "ObjectID") {
@@ -122,14 +154,11 @@ function serialize(obj: unknown, seen: WeakSet<object> = new WeakSet()): unknown
     }
   }
 
-  // objects (including plain objects and Mongoose documents)
   if (t === "object" && obj !== null) {
-    // prevent infinite recursion on circular refs
     if (seen.has(obj as object)) {
       return "[Circular]";
     }
     seen.add(obj as object);
-
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       out[key] = serialize(value, seen);
@@ -137,32 +166,42 @@ function serialize(obj: unknown, seen: WeakSet<object> = new WeakSet()): unknown
     return out;
   }
 
-  // fallback
   return String(obj);
 }
 
 /**
- * POST /api/employee
+ * Inspect an uploadFiles-like array and return a small summary
  */
+function summarizeUploadFiles(arr: unknown): { index: number; originalType: string; stringValue: string; isHttp: boolean }[] {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((v, idx) => {
+    const t = typeof v;
+    const s = safeString(v);
+    const isHttp = s.startsWith("http://") || s.startsWith("https://");
+    return { index: idx, originalType: t, stringValue: s, isHttp };
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
 
     const bodyRaw: unknown = await req.json();
-    console.log("DEBUG: Incoming body:", JSON.stringify(bodyRaw || {}, null, 2));
 
     if (!bodyRaw || typeof bodyRaw !== "object") {
-      return NextResponse.json(
-        { success: false, message: "Invalid request body" },
-        { status: 400 }
-      );
+      console.warn("[employee-api] Invalid request body type");
+      return NextResponse.json({ success: false, message: "Invalid request body" }, { status: 400 });
     }
 
     const body = bodyRaw as CreateLeadBody;
-
     const { type, customerInfo, products, shippingInfo, employee } = body;
 
-    // Basic validation
+    // Minimal runtime checks and focused logs to confirm presence of URLs
+    console.log("[employee-api] Received request - type:", String(type ?? ""));
+    if (employee && typeof employee === "object") {
+      console.log("[employee-api] Employee mongoId present:", Boolean(employee.mongoId));
+    }
+
     const missing: string[] = [];
     if (!type || typeof type !== "string") missing.push("type");
     if (!employee || typeof employee !== "object") missing.push("employee");
@@ -172,53 +211,52 @@ export async function POST(req: NextRequest) {
     }
 
     if (missing.length) {
-      return NextResponse.json(
-        { success: false, message: `Missing fields: ${missing.join(", ")}` },
-        { status: 400 }
-      );
+      console.warn("[employee-api] Missing fields:", missing);
+      return NextResponse.json({ success: false, message: `Missing fields: ${missing.join(", ")}` }, { status: 400 });
     }
 
     const employeeMongoObjId = toObjectId(employee.mongoId);
     if (!employeeMongoObjId) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid employee.mongoId (not an ObjectId)",
-        },
-        { status: 400 }
-      );
+      console.warn("[employee-api] Invalid employee.mongoId:", employee.mongoId);
+      return NextResponse.json({ success: false, message: "Invalid employee.mongoId (not an ObjectId)" }, { status: 400 });
     }
 
     const legacyEmployeeId = safeString(employee.employeeId ?? employee.employeeCode ?? "");
+    const normalizedType = String(type ?? "").trim().toLowerCase();
 
-    // Map products safely
-    const mappedProducts: {
-      productName: string;
-      quantity: number;
-      size: string;
-      usage: string;
-      targetPrice: number;
-      uploadFiles: string[];
-    }[] =
-      Array.isArray(products) && products.length
-        ? products.map((p) => {
-            const uploadFiles =
-              Array.isArray(p.uploadFiles) && p.uploadFiles.length
-                ? (p.uploadFiles as unknown[]).map((u) => safeString(u)).filter((u) => u.startsWith("http"))
-                : [];
-            return {
-              productName: safeString(p.productName ?? p.name),
-              quantity: safeNumber(p.quantity ?? p.qty),
-              size: safeString(p.size),
-              usage: safeString(p.usage),
-              targetPrice: safeNumber(p.targetPrice ?? p.price),
-              uploadFiles,
-            };
-          })
-        : [];
+    const isCSEmployee = (() => {
+      const check = (s: string) => {
+        const t = s.trim().toUpperCase();
+        return t.startsWith("CS") || t.startsWith("CS-") || t.startsWith("CS_EMP") || t.startsWith("CS-EMP");
+      };
+      if (legacyEmployeeId) {
+        if (check(legacyEmployeeId)) return true;
+      }
+      if (typeof employee.employeeCode === "string" && check(employee.employeeCode)) return true;
+      if (typeof employee.employeeId === "string" && check(employee.employeeId)) return true;
+      return false;
+    })();
 
-    // Compute marka (preferred from client, otherwise auto)
+    let currentStatus = "Shipping";
+    if (isCSEmployee) currentStatus = "Customer Service";
+    else if (normalizedType === "sourcing") currentStatus = "Sourcing";
+    else if (normalizedType === "customer service") currentStatus = "Customer Service";
+    else if (normalizedType === "shipping") currentStatus = "Shipping";
+
+    // Products: only keep a lightweight summary to check for http URLs
+    if (Array.isArray(products)) {
+      const rawSummaries = products.map((p, idx) => ({
+        index: idx,
+        productName: safeString(p.productName ?? p.name),
+        uploadFilesSummary: summarizeUploadFiles(p.uploadFiles),
+      }));
+      console.log("[employee-api] Products uploadFiles summary:", JSON.stringify(rawSummaries));
+    } else {
+      console.log("[employee-api] No products array in payload or empty");
+    }
+
     const cust = (customerInfo ?? {}) as CustomerInfo;
+
     const clientMarka = safeString(cust.marka ?? cust.mark ?? "");
     const computedMarka = (() => {
       const n = safeString(cust.customerName).trim().toUpperCase();
@@ -228,18 +266,14 @@ export async function POST(req: NextRequest) {
     })();
     const finalMarkaBase = clientMarka || computedMarka || "";
 
-    // Ensure unique marka when same marka exists but different contact number
     let finalMarka = finalMarkaBase;
     if (finalMarkaBase) {
       try {
         const regex = new RegExp(`^${escapeRegex(finalMarkaBase)}(\\d*)?$`, "i");
-
-        // Query existing leads whose customerService.marka matches regex
         const existingDocs = await Lead.find({
           "customerService.marka": { $regex: regex },
         }).lean();
-
-        const existing = Array.isArray(existingDocs) ? (existingDocs as unknown[]) : [];
+        const existing = Array.isArray(existingDocs) ? existingDocs : [];
 
         if (existing.length > 0) {
           const currentContact = safeString(cust.contactNumber);
@@ -249,9 +283,7 @@ export async function POST(req: NextRequest) {
             const existingContact = safeString(cs?.contactNumber);
             return existingContact && existingContact === currentContact;
           });
-
           if (!sameContactExists) {
-            // compute highest numeric suffix among existing markas (base counts as 1)
             let maxNum = 0;
             for (const docUnknown of existing) {
               const doc = docUnknown as Record<string, unknown>;
@@ -267,7 +299,6 @@ export async function POST(req: NextRequest) {
             }
             const nextNum = maxNum + 1 || 2;
             finalMarka = `${finalMarkaBase}${nextNum}`;
-            console.log(`DEBUG: Marka collision found. Generated new marka: ${finalMarka}`);
           } else {
             finalMarka = finalMarkaBase;
           }
@@ -275,12 +306,24 @@ export async function POST(req: NextRequest) {
           finalMarka = finalMarkaBase;
         }
       } catch (err) {
-        console.warn("WARNING: marka uniqueness check failed, using base marka. Error:", err);
+        console.warn("[employee-api] marka computation failed:", err);
         finalMarka = finalMarkaBase;
       }
     }
 
-    // Build base "employee section" that includes both mongoId and legacy id
+    const sourceForShipping: Record<string, unknown> | undefined =
+      shippingInfo && typeof shippingInfo === "object"
+        ? shippingInfo
+        : (customerInfo as Record<string, unknown> | undefined);
+
+    const mappedShipping = mapShippingInfo(sourceForShipping);
+
+    // Focused log for shipping URLs only
+    console.log("[employee-api] Shipping URLs:", {
+      uploadInvoice: mappedShipping.uploadInvoice,
+      uploadPackingList: mappedShipping.uploadPackingList,
+    });
+
     const baseSection = {
       employeeMongoId: employeeMongoObjId,
       employeeId: legacyEmployeeId || null,
@@ -288,12 +331,11 @@ export async function POST(req: NextRequest) {
       logs: [] as unknown[],
     };
 
-    // Create lead object
     const leadId = `LEAD-${Date.now()}`;
 
     const leadData: Record<string, unknown> = {
       leadId,
-      currentStatus: String(type).toLowerCase() === "sourcing" ? "Customer Service" : "Shipping",
+      currentStatus,
       currentAssignedEmployee: {
         employeeMongoId: employeeMongoObjId,
         employeeId: legacyEmployeeId || null,
@@ -319,12 +361,29 @@ export async function POST(req: NextRequest) {
         city: safeString(cust.city),
         state: safeString(cust.state),
         marka: finalMarka,
-        products: mappedProducts,
+        products: Array.isArray(products)
+          ? products.map((p) => ({
+              productName: safeString(p.productName ?? p.name),
+              quantity: safeNumber(p.quantity ?? p.qty),
+              size: safeString(p.size),
+              usage: safeString(p.usage),
+              targetPrice: safeNumber(p.targetPrice ?? p.price),
+              uploadFiles:
+                Array.isArray(p.uploadFiles) && p.uploadFiles.length
+                  ? (p.uploadFiles as unknown[])
+                      .map((u) => safeString(u))
+                      .map((s) => s.replace(/\s+/g, " "))
+                      .filter((s) => s.length > 0 && (s.startsWith("http://") || s.startsWith("https://")))
+                  : [],
+              remark: safeString((p as ProductInput).remark ?? ""),
+            }))
+          : [],
+        remark: safeString(cust.remark ?? ""),
       },
 
       sourcing: {
         ...baseSection,
-        productName: "",
+        productName: safeString(cust.customerName ?? ""),
         companyName: safeString(cust.companyName ?? ""),
         companyAddress: safeString(cust.companyAddress ?? ""),
         supplierName: "",
@@ -333,50 +392,71 @@ export async function POST(req: NextRequest) {
         productCatalogue: "",
         productUnitPrice: 0,
         uploadDocuments: [] as string[],
+        remark: safeString(cust.remark ?? ""),
       },
 
       shipping: {
         ...baseSection,
-        itemName: safeString((shippingInfo ?? {}).itemName),
-        totalCTN: safeNumber((shippingInfo ?? {}).totalCTN),
-        totalCBM: safeNumber((shippingInfo ?? {}).totalCBM),
-        totalKG: safeNumber((shippingInfo ?? {}).totalKG),
-        totalValue: safeNumber((shippingInfo ?? {}).totalValue),
-        totalPCS: safeNumber((shippingInfo ?? {}).totalPCS),
-        hsnCode: safeString((shippingInfo ?? {}).hsnCode),
-        shipmentMode: safeString((shippingInfo ?? {}).shipmentMode),
-        uploadInvoice: safeString((shippingInfo ?? {}).uploadInvoice),
-        uploadPackingList: safeString((shippingInfo ?? {}).uploadPackingList),
-        freightRate: safeNumber((shippingInfo ?? {}).freightRate),
-        marka: safeString((shippingInfo ?? {}).marka ?? finalMarka),
+        itemName: safeString(mappedShipping.itemName),
+        totalCTN: mappedShipping.totalCTN ?? 0,
+        totalCBM: mappedShipping.totalCBM ?? 0,
+        totalKG: mappedShipping.totalKG ?? 0,
+        totalValue: mappedShipping.totalValue ?? 0,
+        totalPCS: mappedShipping.totalPCS ?? 0,
+        hsnCode: safeString(mappedShipping.hsnCode),
+        shipmentMode: safeString(mappedShipping.shipmentMode),
+        uploadInvoice: safeString(mappedShipping.uploadInvoice),
+        uploadPackingList: safeString(mappedShipping.uploadPackingList),
+        freightRate: mappedShipping.freightRate ?? 0,
+        marka: safeString(mappedShipping.marka ?? finalMarka),
+        remark: safeString(mappedShipping.remark ?? cust.remark ?? ""),
       },
 
       sales: {
         ...baseSection,
         trackingNumber: "",
         warehouseReceipt: "",
+        remark: safeString(cust.remark ?? ""),
       },
     };
 
-    // If products were provided, also add them at top-level `products` for query convenience
-    if (mappedProducts.length) {
-      leadData.products = mappedProducts;
-    }
-
-    // Save
     const newLead = new (Lead as unknown as { new (doc?: Record<string, unknown>): unknown })(leadData);
 
-    // minimal typed wrapper for something that has a .save() returning a plain object
     type SaveableDocument = { save: () => Promise<Record<string, unknown>> };
 
     let saved: Record<string, unknown> | null = null;
     if (newLead && typeof (newLead as SaveableDocument).save === "function") {
-      saved = await (newLead as SaveableDocument).save();
+      try {
+        saved = await (newLead as SaveableDocument).save();
+        console.log("[employee-api] Lead saved:", leadId);
+      } catch (saveErr) {
+        console.error("[employee-api] Save error:", saveErr);
+        const errMessage = (saveErr as Error).message ?? "Save failed";
+        return NextResponse.json({ success: false, message: errMessage, error: String(saveErr) }, { status: 500 });
+      }
+    } else {
+      console.error("[employee-api] newLead does not have save() function");
+      return NextResponse.json({ success: false, message: "Internal server error: invalid model" }, { status: 500 });
     }
 
     const out = serialize(saved ?? newLead);
 
-    console.info("Lead created:", (out as Record<string, unknown>)?.leadId ?? leadId);
+    // Return minimal debug in non-prod so frontend dev can inspect helpful fields
+    if (process.env.NODE_ENV !== "production") {
+      return NextResponse.json({
+        success: true,
+        data: out,
+        debug: {
+          leadId,
+          finalMarka,
+          shippingUrls: {
+            uploadInvoice: mappedShipping.uploadInvoice,
+            uploadPackingList: mappedShipping.uploadPackingList,
+          },
+        },
+      }, { status: 201 });
+    }
+
     return NextResponse.json({ success: true, data: out }, { status: 201 });
   } catch (err) {
     console.error("POST /api/employee error:", err);

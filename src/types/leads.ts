@@ -10,6 +10,7 @@ export interface Log {
 
 // Product type (for CustomerService)
 export interface Product {
+  remark: string;
   productName: string;
   quantity: number;
   size: string;

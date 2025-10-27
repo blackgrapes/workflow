@@ -16,6 +16,7 @@ export interface Product {
   imageUrls?: string[];
   uploading?: boolean;
   statusMessages?: string[];
+  remark?: string; // <-- added per-product remark
 }
 
 export interface LeadPayload {
@@ -24,7 +25,7 @@ export interface LeadPayload {
   employee: {
     mongoId: string; // ✅ MongoDB ObjectId
     employeeName: string;
-     employeeId?: string;
+    employeeId?: string;
   };
   customerInfo: Record<string, string>;
   products: Array<{
@@ -34,6 +35,7 @@ export interface LeadPayload {
     usage?: string;
     targetPrice?: number;
     uploadFiles?: string[];
+    remark?: string; // <-- included remark in payload product
   }>;
 }
 
@@ -49,7 +51,7 @@ const ProductSourcingForm = ({
   employeeMongoId,
 }: ProductSourcingFormProps) => {
   const [products, setProducts] = useState<Product[]>([
-    { id: 1, name: "", qty: "", size: "", usage: "", price: "" },
+    { id: 1, name: "", qty: "", size: "", usage: "", price: "", remark: "" },
   ]);
   const [customerInfo, setCustomerInfo] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +70,7 @@ const ProductSourcingForm = ({
   const addProduct = () =>
     setProducts([
       ...products,
-      { id: products.length + 1, name: "", qty: "", size: "", usage: "", price: "" },
+      { id: products.length + 1, name: "", qty: "", size: "", usage: "", price: "", remark: "" },
     ]);
 
   const removeProduct = (id: number) =>
@@ -168,6 +170,7 @@ const ProductSourcingForm = ({
         usage: p.usage,
         targetPrice: Number(p.price),
         uploadFiles: p.imageUrls ?? [],
+        remark: p.remark, // <-- include per-product remark in payload
       })),
     };
 
@@ -182,7 +185,7 @@ const ProductSourcingForm = ({
       if (res.ok) {
         alert("Lead submitted successfully!");
         setCustomerInfo({});
-        setProducts([{ id: 1, name: "", qty: "", size: "", usage: "", price: "" }]);
+        setProducts([{ id: 1, name: "", qty: "", size: "", usage: "", price: "", remark: "" }]);
       } else {
         alert(`Error: ${data.message || "Failed to submit lead"}`);
       }
@@ -284,6 +287,23 @@ const ProductSourcingForm = ({
                   {msg}
                 </p>
               ))}
+            </div>
+
+            {/* Per-product remark */}
+            <div>
+              <label
+                htmlFor={`product-remark-${product.id}`}
+                className="block text-gray-700 font-medium mb-1"
+              >
+                Product Remark
+              </label>
+              <textarea
+                id={`product-remark-${product.id}`}
+                placeholder="Enter remark specific to this product (optional)"
+                value={product.remark || ""}
+                onChange={(e) => handleProductChange(product.id, "remark", e.target.value)}
+                className="w-full border rounded-md p-2 h-20"
+              />
             </div>
           </div>
         ))}

@@ -30,6 +30,7 @@ export interface Product {
   usage?: string;
   targetPrice?: number;
   uploadFiles: string[];
+  remark: string;
 }
 
 const ProductSchema = new Schema<Product>(
@@ -40,6 +41,7 @@ const ProductSchema = new Schema<Product>(
     usage: String,
     targetPrice: Number,
     uploadFiles: [String],
+    remark: String,
   },
   { _id: false }
 );
@@ -58,6 +60,7 @@ export interface CustomerService {
   employeeId?: Types.ObjectId | string;
   managerId?: Types.ObjectId | string;
   logs: Log[];
+  remark?: string; // <-- added remark for CustomerService
 }
 
 const CustomerServiceSchema = new Schema<CustomerService>(
@@ -72,6 +75,7 @@ const CustomerServiceSchema = new Schema<CustomerService>(
     employeeId: { type: Schema.Types.Mixed },
     managerId: { type: Schema.Types.Mixed },
     logs: [LogSchema],
+    remark: String, // <-- schema field
   },
   { _id: false }
 );
@@ -92,6 +96,7 @@ export interface Sourcing {
   employeeId?: Types.ObjectId | string;
   managerId?: Types.ObjectId | string;
   logs: Log[];
+  remark?: string; // <-- added remark for Sourcing
 }
 
 const SourcingSchema = new Schema<Sourcing>(
@@ -108,6 +113,7 @@ const SourcingSchema = new Schema<Sourcing>(
     employeeId: { type: Schema.Types.Mixed },
     managerId: { type: Schema.Types.Mixed },
     logs: [LogSchema],
+    remark: String, // <-- schema field
   },
   { _id: false }
 );
@@ -131,6 +137,7 @@ export interface Shipping {
   managerId?: Types.ObjectId | string;
   freightRate?: number;
   logs: Log[];
+  remark?: string; // <-- added remark for Shipping
 }
 
 const ShippingSchema = new Schema<Shipping>(
@@ -150,6 +157,7 @@ const ShippingSchema = new Schema<Shipping>(
     managerId: { type: Schema.Types.Mixed },
     freightRate: Number,
     logs: [LogSchema],
+    remark: String, // <-- schema field
   },
   { _id: false }
 );
@@ -163,6 +171,7 @@ export interface Sales {
   employeeId?: Types.ObjectId | string;
   managerId?: Types.ObjectId | string;
   logs: Log[];
+  remark?: string; // <-- added remark for Sales
 }
 
 const SalesSchema = new Schema<Sales>(
@@ -172,6 +181,7 @@ const SalesSchema = new Schema<Sales>(
     employeeId: { type: Schema.Types.Mixed },
     managerId: { type: Schema.Types.Mixed },
     logs: [LogSchema],
+    remark: String, // <-- schema field
   },
   { _id: false }
 );
@@ -223,7 +233,26 @@ const LeadSchema = new Schema<Lead>(
 );
 
 // ---------------------
-// Prevent OverwriteModelError (Next.js Hot Reload safe)
+// Hot-reload safety (Next.js / dev environment)
+// ---------------------
+// When developing with Next.js, module hot-reload can keep an old compiled
+// Mongoose model in mongoose.models. That results in schema changes (like
+// adding `remark`) not being picked up until the process restarts.
+// The block below clears the cached model only in development so your
+// updated schema is used immediately while coding.
+if (process.env.NODE_ENV === "development") {
+  const cached = models as Record<string, unknown>;
+  if (cached && Object.prototype.hasOwnProperty.call(cached, "Lead")) {
+    // delete the cached model so we can compile a fresh one with the
+    // current schema definition
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore -- models is a mutable export from mongoose
+    delete (models as Record<string, unknown>).Lead;
+  }
+}
+
+// ---------------------
+// Register model
 // ---------------------
 const LeadModel = models.Lead || model<Lead>("Lead", LeadSchema);
 
