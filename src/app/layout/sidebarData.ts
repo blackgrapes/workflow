@@ -60,14 +60,6 @@ export const employeeSidebar: SidebarItem[] = [
 export const managerSidebar: SidebarItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   {
-    name: "Team Management",
-    icon: Users,
-    children: [
-      { name: "All Employees", href: "/admin/employees", icon: Users },
-      { name: "Add Employee", href: "/admin/employees/add", icon: UserPlus },
-    ],
-  },
-  {
     name: "Leads Management",
     icon: ClipboardType,
     children: [
