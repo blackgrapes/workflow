@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { User, Briefcase, Smartphone, MapPin, Key, Plus } from "lucide-react";
 import {
   generateEmployeeId,
   generatePassword,
@@ -9,19 +10,53 @@ import {
 import { EmployeeData as GlobalEmployeeData, Role } from "@/types/user";
 import { validateEmployeeForm } from "../../../../lib/frontendFunctions/admin/employeeValidation";
 
-// Only allow Manager or Employee in the form (exclude Admin)
+// allow Manager or Employee (exclude Admin)
 export type EmployeeType = Exclude<Role, "Admin">;
 
 interface EmployeeFormProps {
-  onSubmit?: (employeeData: GlobalEmployeeData) => void;
-  type: "admin" | "manager"; // form creator type
-  department?: string; // when creator is manager, their department
+  onSubmit?: (employeeData: GlobalEmployeeData) => void | Promise<void>;
+  type: "admin" | "manager";
+  department?: string;
   managerId?: string;
-  defaultValues?: GlobalEmployeeData; // For edit mode
+  defaultValues?: GlobalEmployeeData;
 }
 
-const DEPARTMENTS = ["Sales", "Shipping", "Customer Service", "Sourcing"];
-const EMPLOYEE_TYPES = ["Employee", "Manager"];
+interface FormState {
+  name: string;
+  role: string;
+  phone: string;
+  location: string;
+  department: "Sales" | "Shipping" | "Customer Service" | "Sourcing";
+  employeeType: EmployeeType | "";
+  managerIdPart1: string;
+  managerIdPart2: string;
+  managerIdPart3: string;
+}
+
+interface ErrorsState {
+  name: string;
+  role: string;
+  phone: string;
+  location: string;
+  managerIdMismatch: string;
+}
+
+/** department code detection:
+ * sa -> Sales
+ * so -> Sourcing
+ * sh -> Shipping
+ * cs -> Customer Service
+ * sl -> Sourcing
+ */
+function detectDepartmentFromPrefix(prefix: string): string | null {
+  const p = prefix.toLowerCase();
+  if (p === "sa") return "Sales";
+  if (p === "so") return "Sourcing";
+  if (p === "sh") return "Shipping";
+  if (p === "cs") return "Customer Service";
+  if (p === "sl") return "Sourcing";
+  return null;
+}
 
 export default function EmployeeForm({
   onSubmit,
@@ -33,41 +68,60 @@ export default function EmployeeForm({
   const isEditMode = Boolean(defaultValues);
   const isCreatorManager = type === "manager";
 
-  // keep UI identical: labels above, inputs styled as before
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormState>({
     name: defaultValues?.name || "",
     role: defaultValues?.role || "",
     phone: defaultValues?.phone || "",
     location: defaultValues?.location || "",
-    // include department & employeeType in state so selects show current value
-    department: defaultValues?.department || department || DEPARTMENTS[0],
-    employeeType: (defaultValues?.type as EmployeeType) || (isCreatorManager ? "Employee" : EMPLOYEE_TYPES[0]),
+    department: (defaultValues?.department as FormState["department"]) || (department as FormState["department"]) || "Sales",
+    employeeType: (defaultValues?.type as EmployeeType) || (isCreatorManager ? "Employee" : "Employee"),
+    managerIdPart1: "",
+    managerIdPart2: "",
+    managerIdPart3: "",
   });
 
-  const [errors, setErrors] = useState({
+  const [errors, setErrors] = useState<ErrorsState>({
     name: "",
     role: "",
     phone: "",
     location: "",
+    managerIdMismatch: "",
   });
 
-  // Password change state — ONLY used in edit mode
-  const [changePassword, setChangePassword] = useState(false);
-  const [passwords, setPasswords] = useState({
+  const [detectedManagerDepartment, setDetectedManagerDepartment] = useState<string | null>(null);
+
+  const [changePassword, setChangePassword] = useState<boolean>(false);
+  const [passwords, setPasswords] = useState<{ newPassword: string; confirmPassword: string }>({
     newPassword: "",
     confirmPassword: "",
   });
-  const [passwordErrors, setPasswordErrors] = useState({
+  const [passwordErrors, setPasswordErrors] = useState<{ newPassword: string; confirmPassword: string }>({
     newPassword: "",
     confirmPassword: "",
   });
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
   const router = useRouter();
 
-  const handleChange = (field: keyof typeof form, value: string) => {
+  const handleChange = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
-    setErrors((prev) => ({ ...prev, [field]: "" }));
+    if (field === "name" || field === "role" || field === "phone" || field === "location") {
+      setErrors((prev) => ({ ...prev, [field]: "" }));
+    }
+
+    if (field === "managerIdPart1" || field === "managerIdPart2" || field === "managerIdPart3") {
+      const newParts: FormState = { ...form, [field]: value } as FormState;
+      const part1Trim = newParts.managerIdPart1.trim();
+      const prefix = part1Trim.slice(0, 2);
+      const detected = detectDepartmentFromPrefix(prefix);
+      setDetectedManagerDepartment(detected);
+
+      if (detected && newParts.department && newParts.department !== detected) {
+        setErrors((prev) => ({ ...prev, managerIdMismatch: `Detected manager dept: ${detected}. Selected department mismatch.` }));
+      } else {
+        setErrors((prev) => ({ ...prev, managerIdMismatch: "" }));
+      }
+    }
   };
 
   const handlePasswordChange = (field: keyof typeof passwords, value: string) => {
@@ -94,10 +148,31 @@ export default function EmployeeForm({
     return ok;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const getCombinedManagerId = (): string => {
+    const p1 = form.managerIdPart1.trim();
+    const p2 = form.managerIdPart2.trim();
+    const p3 = form.managerIdPart3.trim();
+    if (!p1 && !p2 && !p3) return "";
+    const parts: string[] = [];
+    if (p1) parts.push(p1.toUpperCase());
+    if (p2) parts.push(p2.toUpperCase());
+    if (p3) parts.push(p3.toUpperCase());
+    return parts.join("-");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // validate using your external validator which expects { name, role, phone, location }
+    const combinedManagerId = getCombinedManagerId();
+    if (!isCreatorManager && combinedManagerId) {
+      const prefix = form.managerIdPart1.trim().slice(0, 2);
+      const detected = detectDepartmentFromPrefix(prefix);
+      if (detected && detected !== form.department) {
+        setErrors((prev) => ({ ...prev, managerIdMismatch: `Detected manager dept: ${detected}. Select matching dept or fix manager ID.` }));
+        return;
+      }
+    }
+
     const { valid, errors: validationErrors } = validateEmployeeForm({
       name: form.name,
       role: form.role,
@@ -105,66 +180,55 @@ export default function EmployeeForm({
       location: form.location,
     });
 
-    setErrors(validationErrors);
+    setErrors((prev) => ({
+      ...prev,
+      name: validationErrors.name,
+      role: validationErrors.role,
+      phone: validationErrors.phone,
+      location: validationErrors.location,
+    }));
+
     if (!valid) return;
 
-    // if edit mode and changePassword is toggled, validate passwords
     if (isEditMode && changePassword) {
-      const pwOk = validatePasswords();
-      if (!pwOk) return;
+      if (!validatePasswords()) return;
     }
 
     setLoading(true);
 
-    // Final department/type logic:
-    // - If editing => keep defaultValues' department/type (can't change)
-    // - Else if creator is manager => department fixed to department prop, type fixed to Employee
-    // - Else admin creating => use selected values in form
-    const finalDepartment =
-      defaultValues?.department || (isCreatorManager ? department || form.department : form.department);
-    const finalType = defaultValues?.type
-      ? (defaultValues.type as EmployeeType)
-      : (isCreatorManager ? ("Employee" as EmployeeType) : (form.employeeType as EmployeeType));
-
-    // Password determination:
-    // - Create mode => generatePassword()
-    // - Edit mode:
-    //    - if changePassword true => use entered newPassword
-    //    - else keep defaultValues?.password (unchanged)
-    const finalPassword = isEditMode
-      ? changePassword
-        ? passwords.newPassword
-        : defaultValues?.password || generatePassword()
-      : generatePassword();
-
-    const employeeData: GlobalEmployeeData = {
-      empId: defaultValues?.empId || generateEmployeeId(finalDepartment, finalType),
-      password: finalPassword,
-      status: defaultValues?.status || "Active",
-      name: form.name,
-      role: form.role,
-      phone: form.phone,
-      department: finalDepartment,
-      type: finalType,
-      location: form.location,
-      createdByManagerId:
-        defaultValues?.createdByManagerId || (isCreatorManager ? managerId || "admin" : "admin"),
-    };
-
     try {
-      if (onSubmit) onSubmit(employeeData);
+      const finalDepartment = defaultValues?.department || (isCreatorManager ? (department || form.department) : form.department);
+      const finalType = defaultValues?.type ? (defaultValues.type as EmployeeType) : (isCreatorManager ? ("Employee" as EmployeeType) : (form.employeeType as EmployeeType));
+      const finalPassword = isEditMode ? (changePassword ? passwords.newPassword : defaultValues?.password || generatePassword()) : generatePassword();
 
-      // show helpful alert — in edit mode we explicitly tell if password changed or not
+      const createdByManagerId =
+        defaultValues?.createdByManagerId ||
+        (isCreatorManager ? managerId || "admin" : (combinedManagerId || "admin"));
+
+      const employeeData: GlobalEmployeeData = {
+        empId: defaultValues?.empId || generateEmployeeId(finalDepartment, finalType),
+        password: finalPassword,
+        status: defaultValues?.status || "Active",
+        name: form.name,
+        role: form.role,
+        phone: form.phone,
+        department: finalDepartment,
+        type: finalType,
+        location: form.location,
+        createdByManagerId,
+      };
+
+      if (onSubmit) {
+        await onSubmit(employeeData);
+      }
+
       alert(
-        `✅ Employee ${defaultValues ? "Updated" : "Created"}!\n\nID: ${
-          employeeData.empId
-        }\nPassword: ${isEditMode ? (changePassword ? employeeData.password : "[unchanged]") : employeeData.password}\nType: ${
-          employeeData.type
-        }\nDepartment: ${employeeData.department}\nLocation: ${employeeData.location}\nCreated By: ${employeeData.createdByManagerId}`
+        `✅ ${defaultValues ? "Updated" : "Created"}!\nID: ${employeeData.empId}\nPassword: ${isEditMode ? (changePassword ? employeeData.password : "[unchanged]") : employeeData.password}\nDept: ${employeeData.department}`
       );
 
       router.push("/admin/employees");
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(err);
       alert("❌ Error saving employee!");
     } finally {
@@ -172,173 +236,229 @@ export default function EmployeeForm({
     }
   };
 
+  const showManagerIdInput = (): boolean => {
+    return !isEditMode && !isCreatorManager && form.employeeType === "Employee";
+  };
+
   return (
-    <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {/* Full Name (label above) */}
-      <div className="flex flex-col">
-        <label htmlFor="full-name" className="mb-1 font-medium text-gray-700">Full Name</label>
-        <input
-          id="full-name"
-          type="text"
-          placeholder="Full Name"
-          value={form.name}
-          onChange={(e) => handleChange("name", e.target.value)}
-          required
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.name ? "border-red-500" : ""}`}
-        />
-        {errors.name && <p className="text-red-600 text-sm mt-1">{errors.name}</p>}
+    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto bg-white shadow-lg rounded-2xl p-8 grid gap-6">
+      {/* header */}
+      <div className="flex items-center gap-4">
+        <div className="p-3 bg-teal-50 rounded-xl">
+          <User className="w-7 h-7 text-teal-600" />
+        </div>
+        <div>
+          <h3 className="text-2xl font-semibold">Employee</h3>
+          <p className="text-sm text-gray-500 mt-1">Add or update employee details</p>
+        </div>
       </div>
 
-      {/* Role / Designation */}
-      <div className="flex flex-col">
-        <label htmlFor="role" className="mb-1 font-medium text-gray-700">Role / Designation</label>
-        <input
-          id="role"
-          type="text"
-          placeholder="Role / Designation"
-          value={form.role}
-          onChange={(e) => handleChange("role", e.target.value)}
-          required
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.role ? "border-red-500" : ""}`}
-        />
-        {errors.role && <p className="text-red-600 text-sm mt-1">{errors.role}</p>}
+      {/* name + role */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">Full name</label>
+          <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+            <User className="w-5 h-5 text-gray-500" />
+            <input
+              id="name"
+              className={`w-full bg-transparent outline-none text-base ${errors.name ? "text-red-600" : "text-gray-800"}`}
+              placeholder="John Doe"
+              value={form.name}
+              onChange={(e) => handleChange("name", e.target.value)}
+              required
+            />
+          </label>
+          {errors.name && <p className="text-sm text-red-600 mt-2">{errors.name}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">Role / Designation</label>
+          <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+            <Briefcase className="w-5 h-5 text-gray-500" />
+            <input
+              id="role"
+              className={`w-full bg-transparent outline-none text-base ${errors.role ? "text-red-600" : "text-gray-800"}`}
+              placeholder="Sales Executive"
+              value={form.role}
+              onChange={(e) => handleChange("role", e.target.value)}
+              required
+            />
+          </label>
+          {errors.role && <p className="text-sm text-red-600 mt-2">{errors.role}</p>}
+        </div>
       </div>
 
-      {/* Phone */}
-      <div className="flex flex-col">
-        <label htmlFor="phone" className="mb-1 font-medium text-gray-700">Phone</label>
-        <input
-          id="phone"
-          type="text"
-          placeholder="Phone"
-          value={form.phone}
-          onChange={(e) => handleChange("phone", e.target.value)}
-          required
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.phone ? "border-red-500" : ""}`}
-        />
-        {errors.phone && <p className="text-red-600 text-sm mt-1">{errors.phone}</p>}
+      {/* phone + location */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+          <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+            <Smartphone className="w-5 h-5 text-gray-500" />
+            <input
+              id="phone"
+              className={`w-full bg-transparent outline-none text-base ${errors.phone ? "text-red-600" : "text-gray-800"}`}
+              placeholder="99999 99999"
+              value={form.phone}
+              onChange={(e) => handleChange("phone", e.target.value)}
+              required
+            />
+          </label>
+          {errors.phone && <p className="text-sm text-red-600 mt-2">{errors.phone}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">Location</label>
+          <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+            <MapPin className="w-5 h-5 text-gray-500" />
+            <input
+              id="location"
+              className={`w-full bg-transparent outline-none text-base ${errors.location ? "text-red-600" : "text-gray-800"}`}
+              placeholder="City / Branch"
+              value={form.location}
+              onChange={(e) => handleChange("location", e.target.value)}
+            />
+          </label>
+          {errors.location && <p className="text-sm text-red-600 mt-2">{errors.location}</p>}
+        </div>
       </div>
 
-      {/* Department (select) - styled same as inputs so UI remains same */}
-      <div className="flex flex-col">
-        <label htmlFor="department-select" className="mb-1 font-medium text-gray-700">Department</label>
-        <select
-          id="department-select"
-          value={form.department}
-          onChange={(e) => handleChange("department", e.target.value)}
-          disabled={isEditMode || isCreatorManager}
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${isEditMode || isCreatorManager ? "bg-gray-200 cursor-not-allowed" : ""}`}
-        >
-          {/* Keep an empty option to preserve same visual when no value */}
-          {!form.department && <option value="">Select Department</option>}
-          {DEPARTMENTS.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
+      {/* department + type */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label htmlFor="department" className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+          <select
+            id="department"
+            value={form.department}
+            onChange={(e) => handleChange("department", e.target.value as FormState["department"])}
+            disabled={isEditMode || isCreatorManager}
+            className="w-full rounded-2xl border border-gray-200 px-5 py-3 bg-white text-base"
+          >
+            <option value="Sales">Sales</option>
+            <option value="Shipping">Shipping</option>
+            <option value="Customer Service">Customer Service</option>
+            <option value="Sourcing">Sourcing</option>
+          </select>
+          {errors.managerIdMismatch ? (
+            <p className="text-sm text-red-600 mt-3">{errors.managerIdMismatch}</p>
+          ) : detectedManagerDepartment ? (
+            <p className="text-sm text-gray-500 mt-3">Detected manager dept: {detectedManagerDepartment}</p>
+          ) : null}
+        </div>
+
+        <div>
+          <label htmlFor="employeeType" className="block text-sm font-medium text-gray-700 mb-2">Employee Type</label>
+          <select
+            id="employeeType"
+            value={form.employeeType}
+            onChange={(e) => handleChange("employeeType", e.target.value as EmployeeType)}
+            disabled={isEditMode || isCreatorManager}
+            className="w-full rounded-2xl border border-gray-200 px-5 py-3 bg-white text-base"
+          >
+            <option value="Employee">Employee</option>
+            <option value="Manager">Manager</option>
+          </select>
+        </div>
       </div>
 
-      {/* Employee Type (select) - styled like input */}
-      <div className="flex flex-col">
-        <label htmlFor="employee-type-select" className="mb-1 font-medium text-gray-700">Employee Type</label>
-        <select
-          id="employee-type-select"
-          value={form.employeeType}
-          onChange={(e) => handleChange("employeeType", e.target.value)}
-          disabled={isEditMode || isCreatorManager}
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${isEditMode || isCreatorManager ? "bg-gray-200 cursor-not-allowed" : ""}`}
-        >
-          {EMPLOYEE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Location */}
-      <div className="flex flex-col">
-        <label htmlFor="location" className="mb-1 font-medium text-gray-700">Location</label>
-        <input
-          id="location"
-          type="text"
-          placeholder="Location"
-          value={form.location}
-          onChange={(e) => handleChange("location", e.target.value)}
-          className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${errors.location ? "border-red-500" : ""}`}
-        />
-        {errors.location && <p className="text-red-600 text-sm mt-1">{errors.location}</p>}
-      </div>
-
-      {/* Password update area — ONLY visible in edit mode */}
-      {isEditMode && (
-        <div className="md:col-span-2 border rounded-lg p-4 bg-white">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-lg font-medium">Update Password</h3>
-              <p className="text-sm text-gray-500">Only change if you want to update the employee password.</p>
-            </div>
-            <div>
-              <label className="inline-flex items-center">
-                <input
-                  type="checkbox"
-                  checked={changePassword}
-                  onChange={(e) => {
-                    setChangePassword(e.target.checked);
-                    // clear password fields & errors when toggling off
-                    if (!e.target.checked) {
-                      setPasswords({ newPassword: "", confirmPassword: "" });
-                      setPasswordErrors({ newPassword: "", confirmPassword: "" });
-                    }
-                  }}
-                  className="mr-2"
-                />
-                <span className="text-sm">Enable</span>
-              </label>
-            </div>
+      {/* Manager ID input (compact) - only when admin creating an Employee */}
+      {showManagerIdInput() && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Manager ID (optional)</label>
+          <div className="flex flex-wrap items-center gap-4">
+            <input
+              aria-label="Manager ID prefix"
+              maxLength={2}
+              value={form.managerIdPart1}
+              onChange={(e) => handleChange("managerIdPart1", e.target.value.toUpperCase())}
+              placeholder="SA"
+              className="w-24 rounded-2xl border border-gray-200 px-4 py-3 text-center text-base"
+            />
+            <div className="text-gray-400 text-lg">-</div>
+            <input
+              aria-label="Manager ID mid"
+              maxLength={3}
+              value={form.managerIdPart2}
+              onChange={(e) => handleChange("managerIdPart2", e.target.value.toUpperCase())}
+              placeholder="MGR"
+              className="w-28 rounded-2xl border border-gray-200 px-4 py-3 text-center text-base"
+            />
+            <div className="text-gray-400 text-lg">-</div>
+            <input
+              aria-label="Manager ID suffix"
+              maxLength={8}
+              value={form.managerIdPart3}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, "");
+                handleChange("managerIdPart3", v);
+              }}
+              placeholder="38330"
+              className="w-40 rounded-2xl border border-gray-200 px-4 py-3 text-center text-base"
+            />
+            <div className="ml-2 px-4 py-3 bg-gray-50 rounded-2xl border border-gray-100 text-sm">{getCombinedManagerId() || "not set"}</div>
           </div>
-
-          {changePassword && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col">
-                <label htmlFor="new-password" className="mb-1 font-medium text-gray-700">New Password</label>
-                <input
-                  id="new-password"
-                  type="password"
-                  placeholder="New Password"
-                  value={passwords.newPassword}
-                  onChange={(e) => handlePasswordChange("newPassword", e.target.value)}
-                  className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${passwordErrors.newPassword ? "border-red-500" : ""}`}
-                />
-                {passwordErrors.newPassword && <p className="text-red-600 text-sm mt-1">{passwordErrors.newPassword}</p>}
-              </div>
-
-              <div className="flex flex-col">
-                <label htmlFor="confirm-password" className="mb-1 font-medium text-gray-700">Confirm Password</label>
-                <input
-                  id="confirm-password"
-                  type="password"
-                  placeholder="Confirm Password"
-                  value={passwords.confirmPassword}
-                  onChange={(e) => handlePasswordChange("confirmPassword", e.target.value)}
-                  className={`border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 ${passwordErrors.confirmPassword ? "border-red-500" : ""}`}
-                />
-                {passwordErrors.confirmPassword && <p className="text-red-600 text-sm mt-1">{passwordErrors.confirmPassword}</p>}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Submit button */}
-      <div className="md:col-span-2 mt-4">
+      {/* password area (edit only) */}
+      {isEditMode && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-2">New password</label>
+            <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+              <Key className="w-5 h-5 text-gray-500" />
+              <input
+                id="newPassword"
+                type="password"
+                className={`w-full bg-transparent outline-none text-base ${passwordErrors.newPassword ? "text-red-600" : "text-gray-800"}`}
+                placeholder="New password"
+                value={passwords.newPassword}
+                onChange={(e) => handlePasswordChange("newPassword", e.target.value)}
+                disabled={!changePassword}
+              />
+            </label>
+            {passwordErrors.newPassword && <p className="text-sm text-red-600 mt-2">{passwordErrors.newPassword}</p>}
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-2">Confirm password</label>
+            <label className="flex items-center gap-3 bg-gray-50 rounded-2xl px-5 py-4">
+              <Key className="w-5 h-5 text-gray-500" />
+              <input
+                id="confirmPassword"
+                type="password"
+                className={`w-full bg-transparent outline-none text-base ${passwordErrors.confirmPassword ? "text-red-600" : "text-gray-800"}`}
+                placeholder="Confirm password"
+                value={passwords.confirmPassword}
+                onChange={(e) => handlePasswordChange("confirmPassword", e.target.value)}
+                disabled={!changePassword}
+              />
+            </label>
+            {passwordErrors.confirmPassword && <p className="text-sm text-red-600 mt-2">{passwordErrors.confirmPassword}</p>}
+          </div>
+
+          <div className="flex items-center gap-3 md:col-span-2">
+            <input id="togglePw" type="checkbox" checked={changePassword} onChange={(e) => setChangePassword(e.target.checked)} />
+            <label htmlFor="togglePw" className="text-sm">Enable password update</label>
+          </div>
+        </div>
+      )}
+
+      {/* submit */}
+      <div className="flex justify-end">
         <button
           type="submit"
           disabled={loading}
-          className={`w-full bg-teal-600 hover:bg-teal-700 text-white px-6 py-3 rounded-lg text-lg font-medium ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
+          className={`inline-flex items-center gap-3 rounded-full px-6 py-3 text-white font-medium ${loading ? "bg-teal-300 cursor-not-allowed" : "bg-teal-600 hover:bg-teal-700"}`}
         >
-          {loading ? "Saving..." : isEditMode ? "Update Employee" : type === "admin" ? "Create Manager / Employee" : "Create Employee"}
+          {loading ? (
+            <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeOpacity="0.3" />
+              <path d="M22 12a10 10 0 00-10-10" stroke="white" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <Plus className="w-5 h-5" />
+          )}
+          <span className="text-base">{isEditMode ? "Update" : "Create"}</span>
         </button>
       </div>
     </form>
