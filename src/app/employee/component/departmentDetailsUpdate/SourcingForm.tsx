@@ -14,6 +14,7 @@ import {
   X,
   Image as ImageIcon,
   CheckCircle,
+  JapaneseYen,
 } from "lucide-react";
 
 interface SourcingFormProps {
@@ -47,7 +48,15 @@ export default function SourcingForm({
     logs: [],
   };
 
-  const [formData, setFormData] = useState<Sourcing>(inquiryData ? ({ ...emptyInitial, ...inquiryData } as Sourcing) : emptyInitial);
+  const [formData, setFormData] = useState<Sourcing>(
+    inquiryData ? ({ ...emptyInitial, ...inquiryData } as Sourcing) : emptyInitial
+  );
+
+  // keep a separate string state for the number input so the user can type freely
+  // and we avoid forcing an immediate 0 into the input while typing/clearing.
+  const [inputPrice, setInputPrice] = useState<string>(
+    inquiryData?.productUnitPrice != null ? String(inquiryData.productUnitPrice) : ""
+  );
 
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, string[]>>({
     productCatalogue: inquiryData?.productCatalogue ? [inquiryData.productCatalogue] : [],
@@ -68,6 +77,7 @@ export default function SourcingForm({
         productCatalogue: inquiryData.productCatalogue ? [inquiryData.productCatalogue] : prev.productCatalogue,
         others: inquiryData.uploadDocuments || prev.others,
       }));
+      setInputPrice(inquiryData.productUnitPrice != null ? String(inquiryData.productUnitPrice) : "");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiryData]);
@@ -84,12 +94,31 @@ export default function SourcingForm({
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+
+    if (name === "productUnitPrice") {
+      // update the visible input string so user can type freely (including clearing)
+      setInputPrice(value);
+      // update formData numeric field; keep 0 when empty so backend receives a number
+      setFormData((prev) => ({
+        ...prev,
+        productUnitPrice: value === "" ? 0 : Number(value),
+      }));
+
+      setErrors((prev) => {
+        const copy = { ...prev } as Record<string, string>;
+        if (copy[name]) delete copy[name];
+        return copy;
+      });
+
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
-      [name]: name === "productUnitPrice" ? (value === "" ? 0 : Number(value)) : value,
+      [name]: value,
     }));
     setErrors((prev) => {
-      const copy = { ...prev };
+      const copy = { ...prev } as Record<string, string>;
       if (copy[name]) delete copy[name];
       return copy;
     });
@@ -291,7 +320,7 @@ export default function SourcingForm({
           <label className="block text-sm font-medium text-gray-700 mb-2">Unit Price (RMB)</label>
           <div className="relative">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-              <DollarSign className="w-4 h-4" />
+              <JapaneseYen className="w-4 h-4" />
             </div>
             <input
               id="productUnitPrice"
@@ -300,7 +329,7 @@ export default function SourcingForm({
               min={0}
               step={0.01}
               placeholder="0.00"
-              value={formData.productUnitPrice ?? 0}
+              value={inputPrice}
               onChange={handleChange}
               className="pl-11 pr-3 py-2 w-full rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
@@ -389,6 +418,7 @@ export default function SourcingForm({
                   packingList: [],
                   others: inquiryData.uploadDocuments || [],
                 });
+                setInputPrice(inquiryData.productUnitPrice != null ? String(inquiryData.productUnitPrice) : "");
               } else {
                 setFormData({ ...emptyInitial });
                 setUploadedFiles({
@@ -398,6 +428,7 @@ export default function SourcingForm({
                   packingList: [],
                   others: [],
                 });
+                setInputPrice("");
               }
               setErrors({});
             }}
